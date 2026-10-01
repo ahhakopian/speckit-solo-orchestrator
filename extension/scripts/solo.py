@@ -167,6 +167,68 @@ class Repository:
             raise self.facts.FactError("Stale Spec approval")
         return approval
 
+    def plan_ux_inputs(self, data, spec):
+        folder = Path(spec).parent
+        inputs = self.facts.required_inputs("project-ready", data["canonical_prd"])
+        inputs.update({spec, (folder / "plan.md").as_posix()})
+        for relative in ("DESIGN.md", folder / "ux-design.md", folder / "research.md",
+                         folder / "data-model.md", folder / "quickstart.md", folder / "backward-exception.md"):
+            if (self.project / relative).is_file():
+                inputs.add(Path(relative).as_posix())
+        for name in ("contracts", "design"):
+            for path in (self.project / folder / name).rglob("*"):
+                if path.is_file():
+                    inputs.add(path.relative_to(self.project).as_posix())
+        return sorted(inputs)
+
+    def review_inputs(self, data, boundary, spec):
+        inputs = self.plan_ux_inputs(data, spec)
+        if boundary == "tasks-guard":
+            inputs = sorted(inputs + [(Path(spec).parent / "tasks.md").as_posix()])
+        return inputs
+
+    def review_fingerprint(self, boundary, subject, inputs, spec):
+        # Aggregate the installed helper's document fingerprints in the existing
+        # approval field; no review result or procedural progress is stored.
+        values = {p: self.spec_fingerprint(p) for p in inputs}
+        if boundary == "tasks-guard":
+            relative = (Path(spec).parent / "tasks.md").as_posix()
+            content = self.facts.authority_bytes(relative, self.facts.project_file(self.project, relative)).decode()
+            # Native completion marks are progress, not changes to approved task scope.
+            content = self.lifecycle.TASK.sub(
+                lambda m: m.group(0)[:m.start(1) - m.start()] + " " + m.group(0)[m.end(1) - m.start():], content)
+            values[relative] = hashlib.sha256(content.encode()).hexdigest()
+        body = dict(boundary=boundary, subject=subject, inputs=values)
+        return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def require_review_approval(self, data, boundary, entry, spec):
+        self.require(data, "project-ready")
+        found = [a for a in data["approvals"] if a["boundary"] == boundary and a["subject"] == entry.id]
+        if (not found or found[0]["human"] is not True or
+                found[0]["decision"] != "approve" or found[0]["verification"] != "PASS"):
+            raise self.facts.FactError(f"Current human {boundary} approval required")
+        approval = found[0]
+        inputs = self.review_inputs(data, boundary, spec)
+        if (approval["inputs"] != inputs or
+                approval["fingerprint"] != self.review_fingerprint(boundary, entry.id, inputs, spec)):
+            raise self.facts.FactError(f"Stale {boundary} approval")
+        return approval
+
+    def require_post_implementation(self, data, entry, spec):
+        self.require(data, "project-ready")
+        found = [a for a in data["approvals"] if a["boundary"] == "post-implementation" and a["subject"] == entry.id]
+        if (not found or found[0]["human"] is not True or
+                found[0]["decision"] != "approve" or found[0]["verification"] != "PASS"):
+            raise self.facts.FactError("Current human post-implementation approval required")
+        approval = found[0]
+        if not set(self.feature_inputs(data, spec)).issubset(approval["inputs"]):
+            raise self.facts.FactError("Post-Implementation approval omits current Feature authorities")
+        current = self.facts.fingerprint(self.project, "human-acceptance", entry.id,
+                                        data["canonical_prd"], approval["inputs"], spec)
+        if current != approval["fingerprint"]:
+            raise self.facts.FactError("Stale post-implementation approval")
+        return approval
+
     def readiness(self):
         self.human_mode()
         data = self.load()
@@ -192,14 +254,21 @@ class Repository:
             raise ValueError("An explicit human declaration is required")
         data = self.load()
         subject, spec = "foundation", None
-        if boundary in {"spec", READINESS, "human-acceptance"}:
+        if boundary in FEATURE_APPROVALS:
             self.human_mode()
             self.require(data, "project-ready")
             entry, spec = self.feature()
             if entry.fields["Status"] != "active":
                 raise ValueError("Feature approval requires the current active Feature")
             subject = entry.id
-            inputs = [spec] if boundary == "spec" else self.feature_inputs(data, spec, evidence)
+            if boundary == "spec":
+                inputs = [spec]
+            elif boundary in {"plan-ux", "tasks-guard"}:
+                inputs = self.review_inputs(data, boundary, spec)
+            else:
+                if boundary == "post-implementation":
+                    self.lifecycle.require_clean_tasks(self.project, spec)
+                inputs = self.feature_inputs(data, spec, evidence)
         else:
             if boundary not in {"architecture", "project-ready"}:
                 raise ValueError("Use declare-prd for an already approved input")
@@ -210,16 +279,25 @@ class Repository:
         expected = "PROJECT READY" if boundary == "project-ready" else "PASS"
         if verification != expected:
             raise ValueError(f"Approval requires current {expected} verification")
-        fingerprint_boundary = "human-acceptance" if boundary == READINESS else boundary
+        fingerprint_boundary = "human-acceptance" if boundary in {READINESS, "post-implementation"} else boundary
+        if boundary == "spec":
+            fingerprint = self.spec_fingerprint(spec)
+        elif boundary in {"plan-ux", "tasks-guard"}:
+            fingerprint = self.review_fingerprint(boundary, subject, inputs, spec)
+        else:
+            fingerprint = self.facts.fingerprint(self.project, fingerprint_boundary, subject,
+                                                 data["canonical_prd"], inputs, spec)
         approval = dict(boundary=boundary, subject=subject, decision="reject" if reject else "approve",
                         human=True, verification=verification, inputs=inputs,
-                        fingerprint=self.spec_fingerprint(spec) if boundary == "spec" else
-                        self.facts.fingerprint(self.project, fingerprint_boundary, subject,
-                                               data["canonical_prd"], inputs, spec))
+                        fingerprint=fingerprint)
         data["approvals"] = [a for a in data["approvals"] if (a["boundary"], a["subject"]) != (boundary, subject)] + [approval]
         if not reject and boundary != READINESS:
             if boundary == "spec":
                 self.require_spec_approval(data, entry, spec)
+            elif boundary in {"plan-ux", "tasks-guard"}:
+                self.require_review_approval(data, boundary, entry, spec)
+            elif boundary == "post-implementation":
+                self.require_post_implementation(data, entry, spec)
             else:
                 self.require(data, boundary, subject=subject, spec=spec, evidence=list(evidence))
         self.save(data)
@@ -291,14 +369,29 @@ class Repository:
             except self.facts.FactError:
                 return dict(commands=[dict(command="speckit.clarify")], boundary="spec", subject=entry.id)
             return dict(commands=[dict(command="speckit.clarify"), dict(command="speckit.plan")])
+        try:
+            self.require_review_approval(data, "plan-ux", entry, spec)
+        except self.facts.FactError:
+            return dict(commands=[], boundary="plan-ux", subject=entry.id)
         if not (folder / "tasks.md").exists():
-            return dict(commands=[dict(command="speckit.tasks")])
+            return dict(commands=[dict(command="speckit.tasks")], boundary="tasks-guard", subject=entry.id)
+        try:
+            self.require_review_approval(data, "tasks-guard", entry, spec)
+        except self.facts.FactError:
+            return dict(commands=[dict(command="speckit.feature-governance-guard.review")],
+                        boundary="tasks-guard", subject=entry.id)
         try:
             self.lifecycle.require_clean_tasks(self.project, spec)
         except self.lifecycle.LifecycleError as exc:
             if str(exc) != "tasks.md has incomplete tasks":
                 raise
-            return dict(commands=[dict(command="speckit.analyze"), dict(command="speckit.implement")])
+            return dict(commands=[dict(command="speckit.analyze"), dict(command="speckit.implement")],
+                        boundary="post-implementation", subject=entry.id)
+        try:
+            self.require_post_implementation(data, entry, spec)
+        except self.facts.FactError:
+            return dict(commands=[dict(command="speckit.mvp-complexity-guard.simplify")],
+                        boundary="post-implementation", subject=entry.id)
         try:
             self.require(data, "human-acceptance", subject=entry.id, spec=spec)
         except self.facts.FactError:
@@ -366,7 +459,7 @@ def main():
     declaration.add_argument("canonical_prd")
     declaration.add_argument("--human", action="store_true")
     approval = actions.add_parser("approve")
-    approval.add_argument("boundary", choices=("architecture", "project-ready", "spec", READINESS, "human-acceptance"))
+    approval.add_argument("boundary", choices=sorted(FOUNDATION_APPROVALS | FEATURE_APPROVALS))
     approval.add_argument("--human", action="store_true")
     approval.add_argument("--reject", action="store_true")
     approval.add_argument("--verification", required=True)

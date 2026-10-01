@@ -64,8 +64,11 @@ class Fixture(TestCase):
         self.write(".specify/feature.json", json.dumps({"feature_directory": "specs/001-first"}))
         args = lifecycle.parser().parse_args(["start", "RM-01", "specs/001-first/spec.md"])
         lifecycle.apply(self.project, args)
+        self.repo.approve("spec", human=True, verification="PASS")
         self.write("specs/001-first/plan.md", "COMPATIBLE\nApproved design.\n")
+        self.repo.approve("plan-ux", human=True, verification="PASS")
         self.write("specs/001-first/tasks.md", tasks)
+        self.repo.approve("tasks-guard", human=True, verification="PASS")
 
     def commands(self, route):
         return [c.get("command", c.get("interface")) for c in route["commands"]]
@@ -187,6 +190,7 @@ class RoutingTests(Fixture):
         template = self.repo.approve(solo.READINESS, human=True, verification="PASS")
         original = (self.project / solo.REGISTRY).read_bytes()
         for boundary in ("analyze-completed", "clarify-completed", "checklist-completed", "checklist-skipped",
+                         "plan-completed", "tasks-completed", "implement-completed", "converge-completed",
                          "tasks-done", "current-stage", "next-stage", "unknown"):
             with self.subTest(boundary=boundary):
                 data = json.loads(original)
@@ -269,6 +273,7 @@ class RoutingTests(Fixture):
     def test_human_acceptance_delegates_completion_and_fresh_verification(self):
         self.feature(tasks="- [x] T001 Implement approved contract\n")
         self.write("evidence/result.txt", "Current verified implementation.\n")
+        self.repo.approve("post-implementation", human=True, verification="PASS")
         route = self.repo.next()
         self.assertEqual(self.commands(route), ["speckit.converge", "speckit.greenfield-roadmap-lifecycle.verify"])
         self.assertEqual(route["boundary"], "human-acceptance")
@@ -288,6 +293,7 @@ class RoutingTests(Fixture):
         self.write("evidence/result.txt", "Current verification.\n")
         self.repo.approve("human-acceptance", human=True, verification="PASS", evidence=["evidence/result.txt"])
         self.write("src/service.py", "Changed implementation.\n")
+        self.repo.approve("post-implementation", human=True, verification="PASS")
         self.assertEqual(solo.Repository(self.project).next()["boundary"], "human-acceptance")
         before = (self.project / "ROADMAP.md").read_bytes()
         lifecycle = self.repo.lifecycle
@@ -312,12 +318,149 @@ class RoutingTests(Fixture):
             self.assertNotIn(forbidden, runtime)
 
 
+class FeatureHitlRoutingTests(Fixture):
+    def drop(self, boundary):
+        data = self.repo.load()
+        data["approvals"] = [a for a in data["approvals"] if a["boundary"] != boundary]
+        self.repo.save(data)
+
+    def test_plan_ux_approval_is_required_before_tasks(self):
+        self.feature()
+        (self.project / "specs/001-first/tasks.md").unlink()
+        self.drop("plan-ux")
+        before = self.snapshot()
+        for _ in range(2):
+            route = solo.Repository(self.project).next()
+            self.assertEqual(route, {"commands": [], "boundary": "plan-ux", "subject": "RM-01"})
+        self.assertEqual(before, self.snapshot())
+        self.repo.approve("plan-ux", human=True, verification="PASS")
+        route = self.repo.next()
+        self.assertEqual(self.commands(route), ["speckit.tasks"])
+        self.assertEqual(route["boundary"], "tasks-guard")
+
+    def test_plan_ux_freshness_binds_design_and_native_plan_documents(self):
+        self.feature()
+        (self.project / "specs/001-first/tasks.md").unlink()
+        for relative in ("specs/001-first/plan.md", "specs/001-first/ux-design.md", "DESIGN.md",
+                         "specs/001-first/contracts/api.md", "specs/001-first/design/panel.md",
+                         "specs/001-first/research.md", "specs/001-first/data-model.md",
+                         "specs/001-first/quickstart.md"):
+            with self.subTest(relative=relative):
+                self.repo.approve("plan-ux", human=True, verification="PASS")
+                self.write(relative, "Materially changed governed design.\n")
+                self.assertEqual(self.repo.next()["boundary"], "plan-ux")
+                self.assertNotIn("speckit.tasks", self.commands(self.repo.next()))
+                self.repo.approve("plan-ux", human=True, verification="PASS")
+                self.assertIn("speckit.tasks", self.commands(self.repo.next()))
+        (self.project / "specs/001-first/ux-design.md").unlink()
+        self.assertEqual(self.repo.next()["boundary"], "plan-ux")
+
+    def test_tasks_guard_approval_is_required_before_analyze(self):
+        self.feature()
+        self.drop("tasks-guard")
+        before = self.snapshot()
+        for _ in range(2):
+            route = solo.Repository(self.project).next()
+            self.assertEqual(self.commands(route), ["speckit.feature-governance-guard.review"])
+            self.assertEqual(route["boundary"], "tasks-guard")
+            self.assertNotIn("speckit.analyze", self.commands(route))
+        self.assertEqual(before, self.snapshot())
+        self.repo.approve("tasks-guard", human=True, verification="PASS")
+        self.assertIn("speckit.analyze", self.commands(self.repo.next()))
+        self.write("specs/001-first/tasks.md", "- [ ] T002 Changed approved work\n")
+        self.assertEqual(self.repo.next()["boundary"], "tasks-guard")
+
+    def test_readiness_still_blocks_core_implementation_at_native_hook(self):
+        self.feature()
+        with self.assertRaisesRegex(ValueError, "Implementation Readiness approval required"):
+            self.repo.readiness()
+        self.repo.approve(solo.READINESS, human=True, verification="PASS")
+        self.repo.readiness()
+        self.write("src/service.py", "Material implementation change.\n")
+        with self.assertRaisesRegex(ValueError, "Stale Implementation Readiness"):
+            self.repo.readiness()
+
+    def test_native_task_completion_marks_preserve_tasks_scope_approval(self):
+        self.feature()
+        self.write("specs/001-first/tasks.md", "- [X] T001 Implement approved contract\n")
+        self.assertEqual(self.repo.next()["boundary"], "post-implementation")
+        self.write("specs/001-first/tasks.md", "- [x] T001 Changed task scope\n")
+        self.assertEqual(self.repo.next()["boundary"], "tasks-guard")
+
+    def test_post_implementation_approval_is_required_before_converge(self):
+        self.feature(tasks="- [x] T001 Implement approved contract\n")
+        route = self.repo.next()
+        self.assertEqual(self.commands(route), ["speckit.mvp-complexity-guard.simplify"])
+        self.assertEqual(route["boundary"], "post-implementation")
+        self.assertNotIn("speckit.converge", self.commands(route))
+        self.repo.approve("post-implementation", human=True, verification="PASS")
+        self.assertIn("speckit.converge", self.commands(self.repo.next()))
+        self.write("src/service.py", "Material implementation change.\n")
+        self.assertEqual(self.repo.next()["boundary"], "post-implementation")
+        self.assertNotIn("speckit.converge", self.commands(self.repo.next()))
+
+    def test_post_implementation_cannot_be_approved_with_incomplete_tasks(self):
+        self.feature()
+        with self.assertRaisesRegex(ValueError, "incomplete tasks"):
+            self.repo.approve("post-implementation", human=True, verification="PASS")
+
+    def test_no_human_acceptance_keeps_done_unavailable(self):
+        self.feature(tasks="- [x] T001 Implement approved contract\n")
+        self.write("evidence/result.txt", "Current verification.\n")
+        self.repo.approve("post-implementation", human=True, verification="PASS")
+        route = self.repo.next()
+        self.assertEqual(route["boundary"], "human-acceptance")
+        self.assertNotIn("speckit.greenfield-roadmap-lifecycle.complete", self.commands(route))
+        before = (self.project / "ROADMAP.md").read_bytes()
+        args = self.repo.lifecycle.parser().parse_args(["complete", "RM-01", "--converge", "clean",
+            "--compatibility", "COMPATIBLE", "--feature-after-tasks", "PASS", "--feature-before-implement", "PASS",
+            "--mvp-before-implement", "PASS", "--mvp-after-implement", "PASS", "--verification", "PASS",
+            "--blockers", "none", "--evidence", "evidence/result.txt"])
+        with self.assertRaisesRegex(ValueError, "human-acceptance approval"):
+            self.repo.lifecycle.apply(self.project, args)
+        self.assertEqual(before, (self.project / "ROADMAP.md").read_bytes())
+
+    def test_all_feature_categories_are_recordable_via_cli_without_stage_state(self):
+        self.feature(tasks="- [x] T001 Implement approved contract\n")
+        for boundary in sorted(solo.FEATURE_APPROVALS):
+            with self.subTest(boundary=boundary):
+                result = subprocess.run([sys.executable, "-B", str(ROOT / "extension/scripts/solo.py"),
+                    "--project", str(self.project), "approve", boundary, "--human", "--verification", "PASS"],
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["boundary"], boundary)
+        before = self.snapshot()
+        self.repo.next()
+        self.assertEqual(before, self.snapshot())
+        self.assertFalse((self.project / ".specify/workflows").exists())
+        self.assertEqual(set(self.repo.load()), self.repo.facts.ROOT_FIELDS)
+        self.assertEqual(list((self.project / ".specify/governance").iterdir()), [self.project / solo.REGISTRY])
+
+    def test_rejected_missing_inputs_or_wrong_subject_do_not_authorize(self):
+        self.feature(tasks="- [x] T001 Implement approved contract\n")
+        for boundary in ("plan-ux", "tasks-guard", "post-implementation"):
+            with self.subTest(boundary=boundary):
+                self.repo.approve(boundary, human=True, verification="PASS", reject=True)
+                self.assertEqual(self.repo.next()["boundary"], boundary)
+                self.repo.approve(boundary, human=True, verification="PASS")
+                saved = self.repo.load()
+                for field, value in (("subject", "RM-02"), ("inputs", ["prd.md"])):
+                    data = json.loads(json.dumps(saved))
+                    next(a for a in data["approvals"] if a["boundary"] == boundary)[field] = value
+                    self.repo.save(data)
+                    self.assertEqual(self.repo.next()["boundary"], boundary)
+                self.repo.save(saved)
+
+
 class SpecApprovalRoutingTests(Fixture):
     def setUp(self):
         super().setUp()
         self.feature()
         for name in ("plan.md", "tasks.md"):
             (self.project / "specs/001-first" / name).unlink()
+        data = self.repo.load()
+        data["approvals"] = [a for a in data["approvals"] if a["boundary"] != "spec"]
+        self.repo.save(data)
 
     def assert_spec_boundary(self):
         route = solo.Repository(self.project).next()

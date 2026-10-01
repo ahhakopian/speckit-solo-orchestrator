@@ -48,12 +48,35 @@ Human interaction and storage:
   stale: stop at Spec HITL instead of invoking Plan. Never rely on an earlier
   returned Plan command as authorization. Do not record Clarify completion,
   Checklist completion or a Checklist-skipped fact.
+- At `plan-ux`, present the current native Plan and its applicable UX authority
+  for approval after Plan succeeds. Existing Plan owns shaping, compatibility
+  and all design decisions. Record the explicit decision with
+  `solo.py approve plan-ux --human --verification PASS`. Do not invoke Tasks
+  without a current approval. Immediately before a returned Tasks command,
+  derive the route again and confirm Tasks is still selected; changed Plan/UX
+  content requires renewed approval.
+- At `tasks-guard`, stop only after native Tasks and its mandatory `after_tasks`
+  Feature Governance Guard succeed. For an existing tasks file, run the returned
+  installed Guard afresh; do not recover a saved verdict. Present the current
+  tasks and fresh `FEATURE_GOVERNANCE: PASS` response for approval, then record
+  the explicit decision with `solo.py approve tasks-guard --human --verification PASS`.
+  Immediately before a returned Analyze command, derive the route again and
+  confirm Analyze remains selected. Missing or stale Tasks / Guard approval
+  stops before Analyze. Do not store a guard result or Tasks completion fact.
 - Implementation Readiness is owned by the mandatory hook. Invoke Analyze
   afresh, then native Implement through its prepend preset and ordered hooks.
   Before invoking Implement, run `solo.py hooks`; it must confirm the effective
   native prepend and mandatory ordering. Failure blocks the invocation.
   Stop for explicit approval after Guard and Preflight PASS. Do not record guard
   PASS or an Analyze completion. On a fresh invocation repeat these checks.
+- At `post-implementation`, stop after Core implementation and its mandatory
+  MVP Simplification succeed. A fresh invocation with completed tasks and no
+  current approval reruns the returned installed Simplification review. Present
+  current implementation and review for the explicit decision; record it with
+  `solo.py approve post-implementation --human --verification PASS`.
+  Before any returned Converge command, derive the route again and confirm
+  Converge remains selected. Changed implementation/evidence invalidates the
+  approval. Do not persist implementation or Simplification completion.
 - Human Acceptance follows clean native Converge and fresh installed Greenfield
   completion verification. Retain flags and required evidence only in the active
   response. If Converge adds tasks, inspect state again and return to Analyze /

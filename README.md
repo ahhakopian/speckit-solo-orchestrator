@@ -25,8 +25,10 @@ specify preset add --dev ~/tools/speckit-solo-orchestrator/preset --priority 5
 Invoke generated `speckit.solo-orchestrator.route` through the normal native
 agent invocation. Foundation work stops at Architecture approval and Project
 Ready approval / PROJECT READY. Feature work delegates Specify → Clarify →
-Spec approval → Plan → Tasks → Analyze → Implement → Converge → completion verification →
-Human Acceptance → Greenfield Complete / Feature DONE. The installed mandatory
+Spec approval → Plan → Plan + UX approval → Tasks + Feature Guard → Tasks / Guard
+approval → Analyze → Implement (ordered guards and Readiness approval) → MVP
+Simplification → Post-Implementation approval → Converge → completion verification
+→ Human Acceptance → Greenfield Complete / Feature DONE. The installed mandatory
 hooks supply existing guards. Optional Checklist is applicability-driven.
 Authority decisions and blockers always stop the caller.
 
@@ -39,7 +41,7 @@ subjects are Feature IDs: `spec`, `plan-ux`, `tasks-guard`,
 These are authority decisions, never stage-completion records. The shared
 `prd` declaration is an already-approved input fact with subject `foundation`,
 not a Solo HITL gate. No other approval boundaries are accepted on load or save.
-This vocabulary does not add routing gates or stage behavior.
+These approval categories do not replace delegated stage behavior or checks.
 Reinstall/removal does not own the registry. Approval recording requires an
 explicit human declaration and current verification, supplied by the native
 command's human interaction. These facts are content-bound declarations, not
@@ -53,8 +55,21 @@ Clarify may rerun without a completion fact; the caller rechecks routing after
 it and before Plan so an edit invalidates the earlier Plan selection. Optional
 Checklist remains applicability-driven and adds no completion/skipped fact.
 
-All Greenfield validation and authority fingerprints use installed
-`governance_facts.py`. Implementation Readiness reuses its conservative
+Plan + UX binds the foundation, Spec, Plan, existing native design documents,
+contracts, Feature UX/design artifacts, and applicable `DESIGN.md`. Tasks / Guard
+also binds `tasks.md`. Their fingerprints aggregate the installed helper's
+document fingerprints in the existing current-approval field. Tasks / Guard
+normalizes only native task completion checkboxes when hashing task scope.
+Changes, additions
+or deletions to these authority inputs require renewed approval; task generation
+and implementation writes do not invalidate Plan approval by themselves.
+Native Tasks runs its existing mandatory after-tasks Guard before the approval
+stop. A fresh invocation with no current Tasks / Guard approval repeats the
+installed Guard, retaining no verdict ledger. Post-Implementation similarly
+requires current native MVP Simplification before approval and Converge.
+
+All Greenfield validation and authority content hashing use installed
+`governance_facts.py`. Implementation Readiness and Post-Implementation reuse its conservative
 `human-acceptance` fingerprint, binding foundation and Feature authorities,
 applicable UX, and the project tree. Code, evidence and task changes invalidate
 readiness on a subsequent invocation, including partial implementation; it

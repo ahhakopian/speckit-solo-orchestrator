@@ -1,0 +1,24 @@
+schema_version: "1.0"
+extension:
+  id: "solo-orchestrator"
+  name: "Solo Orchestrator"
+  version: "0.1.0"
+  description: "Route repository-native governed work to installed interfaces."
+  author: "Local Governance"
+  license: "MIT"
+requires:
+  speckit_version: ">=0.16.2,<0.17.0"
+provides:
+  commands:
+    - name: "speckit.solo-orchestrator.route"
+      file: "commands/speckit.solo-orchestrator.route.md"
+      description: "Continue governed work from repository artifacts and human approvals."
+    - name: "speckit.solo-orchestrator.readiness"
+      file: "commands/speckit.solo-orchestrator.readiness.md"
+      description: "Require current human Implementation Readiness approval."
+hooks:
+  before_implement:
+    command: "speckit.solo-orchestrator.readiness"
+    priority: 15
+    optional: false
+    description: "Require Implementation Readiness after Guard and MVP Preflight."

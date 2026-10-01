@@ -15,11 +15,14 @@ existing Greenfield lifecycle configuration must explicitly use
 `completion_mode: human` and `approval_registry: .specify/governance/hitl.json`.
 Solo does not change that configuration.
 
-For review, intended native installation from an initialized project is:
+From an initialized project with the required Feature Governance and MVP
+Governance prerequisites installed, clone this repository and install its
+native Extension and prepend Preset:
 
 ```bash
-specify extension add --dev ~/tools/speckit-solo-orchestrator/extension
-specify preset add --dev ~/tools/speckit-solo-orchestrator/preset --priority 5
+git clone --depth 1 https://github.com/ahhakopian/speckit-solo-orchestrator.git ~/src/speckit-solo-orchestrator
+specify extension add --dev ~/src/speckit-solo-orchestrator/extension
+specify preset add --dev ~/src/speckit-solo-orchestrator/preset --priority 5
 ```
 
 Invoke generated `speckit.solo-orchestrator.route` through the normal native

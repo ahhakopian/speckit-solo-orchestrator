@@ -151,6 +151,22 @@ class Repository:
         inputs.update(evidence)
         return sorted(inputs)
 
+    def spec_fingerprint(self, spec):
+        # Reuse the shared single-document fingerprint mode; this does not grant
+        # PRD authority to the Spec. Current foundation authorization is separate.
+        return self.facts.fingerprint(self.project, "prd", "foundation", spec, [spec])
+
+    def require_spec_approval(self, data, entry, spec):
+        self.require(data, "project-ready")
+        found = [a for a in data["approvals"] if a["boundary"] == "spec" and a["subject"] == entry.id]
+        if (not found or found[0]["human"] is not True or
+                found[0]["decision"] != "approve" or found[0]["verification"] != "PASS"):
+            raise self.facts.FactError("Current human Spec approval required")
+        approval = found[0]
+        if approval["inputs"] != [spec] or approval["fingerprint"] != self.spec_fingerprint(spec):
+            raise self.facts.FactError("Stale Spec approval")
+        return approval
+
     def readiness(self):
         self.human_mode()
         data = self.load()
@@ -176,14 +192,14 @@ class Repository:
             raise ValueError("An explicit human declaration is required")
         data = self.load()
         subject, spec = "foundation", None
-        if boundary in {READINESS, "human-acceptance"}:
+        if boundary in {"spec", READINESS, "human-acceptance"}:
             self.human_mode()
             self.require(data, "project-ready")
             entry, spec = self.feature()
             if entry.fields["Status"] != "active":
                 raise ValueError("Feature approval requires the current active Feature")
             subject = entry.id
-            inputs = self.feature_inputs(data, spec, evidence)
+            inputs = [spec] if boundary == "spec" else self.feature_inputs(data, spec, evidence)
         else:
             if boundary not in {"architecture", "project-ready"}:
                 raise ValueError("Use declare-prd for an already approved input")
@@ -197,11 +213,15 @@ class Repository:
         fingerprint_boundary = "human-acceptance" if boundary == READINESS else boundary
         approval = dict(boundary=boundary, subject=subject, decision="reject" if reject else "approve",
                         human=True, verification=verification, inputs=inputs,
-                        fingerprint=self.facts.fingerprint(self.project, fingerprint_boundary, subject,
-                                                           data["canonical_prd"], inputs, spec))
+                        fingerprint=self.spec_fingerprint(spec) if boundary == "spec" else
+                        self.facts.fingerprint(self.project, fingerprint_boundary, subject,
+                                               data["canonical_prd"], inputs, spec))
         data["approvals"] = [a for a in data["approvals"] if (a["boundary"], a["subject"]) != (boundary, subject)] + [approval]
         if not reject and boundary != READINESS:
-            self.require(data, boundary, subject=subject, spec=spec, evidence=list(evidence))
+            if boundary == "spec":
+                self.require_spec_approval(data, entry, spec)
+            else:
+                self.require(data, boundary, subject=subject, spec=spec, evidence=list(evidence))
         self.save(data)
         return approval
 
@@ -266,6 +286,10 @@ class Repository:
         entry, spec = self.feature()
         folder = (self.project / spec).parent
         if not (folder / "plan.md").exists():
+            try:
+                self.require_spec_approval(data, entry, spec)
+            except self.facts.FactError:
+                return dict(commands=[dict(command="speckit.clarify")], boundary="spec", subject=entry.id)
             return dict(commands=[dict(command="speckit.clarify"), dict(command="speckit.plan")])
         if not (folder / "tasks.md").exists():
             return dict(commands=[dict(command="speckit.tasks")])
@@ -342,7 +366,7 @@ def main():
     declaration.add_argument("canonical_prd")
     declaration.add_argument("--human", action="store_true")
     approval = actions.add_parser("approve")
-    approval.add_argument("boundary", choices=("architecture", "project-ready", READINESS, "human-acceptance"))
+    approval.add_argument("boundary", choices=("architecture", "project-ready", "spec", READINESS, "human-acceptance"))
     approval.add_argument("--human", action="store_true")
     approval.add_argument("--reject", action="store_true")
     approval.add_argument("--verification", required=True)

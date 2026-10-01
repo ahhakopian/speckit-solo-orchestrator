@@ -34,6 +34,20 @@ Human interaction and storage:
   verification. Record it only for `PROJECT READY`; invoke the installed
   lifecycle evaluator `initial --registry .specify/governance/hitl.json`, then
   stop at PROJECT READY. Do not automatically start a Feature in that invocation.
+- Spec approval follows successful installed Specify and a fresh installed
+  Clarify review of the current Spec. Invoke the existing optional Checklist
+  before presenting this decision only when current Feature requirements
+  explicitly call for it; it is not mandatory merely because Solo runs.
+  At the returned `spec` boundary, stop after Clarify and any applicable
+  Checklist, and present the current Spec for explicit approval. Record only
+  the human decision with `solo.py approve spec --human --verification PASS`.
+  This binds the current post-Clarify Spec, not completion of either review.
+  Immediately before invoking any returned Plan command, run `solo.py next`
+  again and confirm it still selects `speckit.plan` with no boundary. If
+  Clarify, Checklist or any other action changed the Spec, the approval is
+  stale: stop at Spec HITL instead of invoking Plan. Never rely on an earlier
+  returned Plan command as authorization. Do not record Clarify completion,
+  Checklist completion or a Checklist-skipped fact.
 - Implementation Readiness is owned by the mandatory hook. Invoke Analyze
   afresh, then native Implement through its prepend preset and ordered hooks.
   Before invoking Implement, run `solo.py hooks`; it must confirm the effective

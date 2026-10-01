@@ -25,7 +25,7 @@ specify preset add --dev ~/tools/speckit-solo-orchestrator/preset --priority 5
 Invoke generated `speckit.solo-orchestrator.route` through the normal native
 agent invocation. Foundation work stops at Architecture approval and Project
 Ready approval / PROJECT READY. Feature work delegates Specify → Clarify →
-Plan → Tasks → Analyze → Implement → Converge → completion verification →
+Spec approval → Plan → Tasks → Analyze → Implement → Converge → completion verification →
 Human Acceptance → Greenfield Complete / Feature DONE. The installed mandatory
 hooks supply existing guards. Optional Checklist is applicability-driven.
 Authority decisions and blockers always stop the caller.
@@ -44,6 +44,14 @@ Reinstall/removal does not own the registry. Approval recording requires an
 explicit human declaration and current verification, supplied by the native
 command's human interaction. These facts are content-bound declarations, not
 cryptographic proof of the human or verification execution.
+
+Spec approval binds the current post-Clarify `spec.md` with the installed
+Greenfield helper's single-document (`prd`) fingerprint mode; this is content
+hashing, not PRD authorization. Current Project Ready authorization is checked
+separately. Missing or stale Spec approval stops at Spec HITL before Plan.
+Clarify may rerun without a completion fact; the caller rechecks routing after
+it and before Plan so an edit invalidates the earlier Plan selection. Optional
+Checklist remains applicability-driven and adds no completion/skipped fact.
 
 All Greenfield validation and authority fingerprints use installed
 `governance_facts.py`. Implementation Readiness reuses its conservative

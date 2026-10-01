@@ -107,6 +107,7 @@ class RoutingTests(Fixture):
         (self.project / "specs/001-first/tasks.md").unlink()
         self.assertEqual(self.commands(solo.Repository(self.project).next()), ["speckit.tasks"])
         (self.project / "specs/001-first/plan.md").unlink()
+        self.repo.approve("spec", human=True, verification="PASS")
         self.assertEqual(self.commands(solo.Repository(self.project).next()), ["speckit.clarify", "speckit.plan"])
 
     def test_ready_feature_routes_despite_planned_dependents(self):
@@ -185,7 +186,8 @@ class RoutingTests(Fixture):
         self.feature()
         template = self.repo.approve(solo.READINESS, human=True, verification="PASS")
         original = (self.project / solo.REGISTRY).read_bytes()
-        for boundary in ("analyze-completed", "clarify-completed", "tasks-done", "current-stage", "unknown"):
+        for boundary in ("analyze-completed", "clarify-completed", "checklist-completed", "checklist-skipped",
+                         "tasks-done", "current-stage", "next-stage", "unknown"):
             with self.subTest(boundary=boundary):
                 data = json.loads(original)
                 data["approvals"].append(dict(template, boundary=boundary))
@@ -308,6 +310,90 @@ class RoutingTests(Fixture):
         runtime = (ROOT / "extension/scripts/solo.py").read_text()
         for forbidden in ("WorkflowEngine", "RunState", "run_id", "current_stage", "sqlite", ".specify/workflows"):
             self.assertNotIn(forbidden, runtime)
+
+
+class SpecApprovalRoutingTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.feature()
+        for name in ("plan.md", "tasks.md"):
+            (self.project / "specs/001-first" / name).unlink()
+
+    def assert_spec_boundary(self):
+        route = solo.Repository(self.project).next()
+        self.assertEqual(self.commands(route), ["speckit.clarify"])
+        self.assertEqual(route["boundary"], "spec")
+        self.assertEqual(route["subject"], "RM-01")
+        self.assertNotIn("speckit.plan", self.commands(route))
+
+    def test_missing_approval_delegates_clarify_then_stops_at_spec_hitl(self):
+        self.assert_spec_boundary()
+
+    def test_current_approval_makes_plan_eligible_and_reuses_shared_fingerprint(self):
+        with patch.object(self.repo.facts, "fingerprint", wraps=self.repo.facts.fingerprint) as fingerprint:
+            approval = self.repo.approve("spec", human=True, verification="PASS")
+            self.assertIn((self.project, "prd", "foundation", "specs/001-first/spec.md",
+                           ["specs/001-first/spec.md"]), [c.args for c in fingerprint.call_args_list])
+        self.assertEqual((approval["boundary"], approval["subject"], approval["inputs"]),
+                         ("spec", "RM-01", ["specs/001-first/spec.md"]))
+        route = solo.Repository(self.project).next()
+        self.assertEqual(self.commands(route), ["speckit.clarify", "speckit.plan"])
+        self.assertNotIn("boundary", route)
+
+    def test_changed_post_clarify_spec_requires_renewed_approval_before_plan(self):
+        self.repo.approve("spec", human=True, verification="PASS")
+        self.assertIn("speckit.plan", self.commands(self.repo.next()))
+        # A Clarify edit after the returned batch must invalidate its Plan authorization.
+        self.write("specs/001-first/spec.md", "ROADMAP entry: RM-01\nClarified local behavior.\n")
+        entry, spec = self.repo.feature()
+        with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
+            self.repo.require_spec_approval(self.repo.load(), entry, spec)
+        self.assert_spec_boundary()
+        self.repo.approve("spec", human=True, verification="PASS")
+        self.assertIn("speckit.plan", self.commands(solo.Repository(self.project).next()))
+
+    def test_noop_clarify_and_fresh_routes_create_no_completion_state(self):
+        for approved in (False, True):
+            if approved:
+                self.repo.approve("spec", human=True, verification="PASS")
+            before = self.snapshot()
+            for _ in range(2):
+                self.repo.next()  # A read-only Clarify leaves precisely this same content.
+            self.assertEqual(before, self.snapshot())
+            self.assertFalse((self.project / ".specify/workflows").exists())
+            self.assertEqual(set(self.repo.load()), self.repo.facts.ROOT_FIELDS)
+            self.assertEqual(list((self.project / ".specify/governance").iterdir()),
+                             [self.project / solo.REGISTRY])
+
+    def test_optional_checklist_is_not_automatically_selected_or_persisted(self):
+        self.assert_spec_boundary()
+        self.write("specs/001-first/checklists/optional.md", "- [ ] Explicitly applicable review\n")
+        self.assert_spec_boundary()
+        self.repo.approve("spec", human=True, verification="PASS")
+        self.assertEqual(self.commands(self.repo.next()), ["speckit.clarify", "speckit.plan"])
+        command = (ROOT / "extension/commands/speckit.solo-orchestrator.route.md").read_text()
+        self.assertIn("explicitly call for it", command)
+        self.assertIn("Immediately before invoking any returned Plan command", command)
+        self.assertIn("again and confirm it still selects `speckit.plan` with no boundary", command)
+        self.assertNotIn("checklist-skipped", [a["boundary"] for a in self.repo.load()["approvals"]])
+
+    def test_rejected_and_wrong_feature_approvals_never_select_plan(self):
+        self.repo.approve("spec", human=True, verification="PASS", reject=True)
+        self.assert_spec_boundary()
+        approval = self.repo.approve("spec", human=True, verification="PASS")
+        data = self.repo.load()
+        next(a for a in data["approvals"] if a["boundary"] == "spec")["subject"] = "RM-02"
+        self.repo.save(data)
+        self.assert_spec_boundary()
+        self.assertEqual(approval["subject"], "RM-01")
+
+    def test_cli_records_spec_approval(self):
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "extension/scripts/solo.py"),
+                                 "--project", str(self.project), "approve", "spec", "--human",
+                                 "--verification", "PASS"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["boundary"], "spec")
+        self.assertIn("speckit.plan", self.commands(solo.Repository(self.project).next()))
 
 
 class ProjectReadyRoutingTests(Fixture):

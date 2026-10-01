@@ -20,6 +20,7 @@ Governance prerequisites installed, clone this repository and install its
 native Extension and prepend Preset:
 
 ```bash
+mkdir -p ~/src
 git clone --depth 1 https://github.com/ahhakopian/speckit-solo-orchestrator.git ~/src/speckit-solo-orchestrator
 specify extension add --dev ~/src/speckit-solo-orchestrator/extension
 specify preset add --dev ~/src/speckit-solo-orchestrator/preset --priority 5

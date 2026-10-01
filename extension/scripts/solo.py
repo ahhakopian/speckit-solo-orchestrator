@@ -36,6 +36,31 @@ def installed(project: Path, extension: str, script: str):
     return module
 
 
+def native_constitution_scaffold():
+    """Read Core's init scaffold, never a project override or composed preset."""
+    try:
+        from specify_cli._assets import _locate_core_pack, _repo_root
+    except ModuleNotFoundError as exc:
+        if exc.name != "specify_cli":
+            raise
+        # Match the isolated native console launcher supported by hooks().
+        launcher = shutil.which("specify")
+        first = Path(launcher).read_text().splitlines()[0] if launcher else ""
+        interpreter = Path(first[2:]) if first.startswith("#!/") else None
+        if not interpreter or not interpreter.is_file() or interpreter.absolute() == Path(sys.executable).absolute():
+            raise ValueError("Use the Python interpreter exposing installed SpecKit for Constitution scaffold identity") from exc
+        script = (
+            "import sys; from specify_cli._assets import _locate_core_pack, _repo_root; "
+            "sys.stdout.buffer.write(((_locate_core_pack() or _repo_root()) / "
+            "'templates/constitution-template.md').read_bytes())"
+        )
+        result = subprocess.run([str(interpreter), "-B", "-c", script], capture_output=True)
+        if result.returncode:
+            raise ValueError(result.stderr.decode().strip())
+        return result.stdout
+    return ((_locate_core_pack() or _repo_root()) / "templates/constitution-template.md").read_bytes()
+
+
 class Repository:
     def __init__(self, project: Path):
         self.project = project.resolve()
@@ -213,7 +238,8 @@ class Repository:
             return dict(commands=[dict(command="speckit.greenfield-foundation.architecture", inputs=common)], boundary="architecture")
         if not (self.project / "ROADMAP.md").exists():
             return dict(commands=[dict(command="speckit.greenfield-foundation.roadmap", inputs=common)])
-        if not (self.project / ".specify/memory/constitution.md").exists():
+        constitution = self.project / ".specify/memory/constitution.md"
+        if not constitution.exists() or constitution.read_bytes() == native_constitution_scaffold():
             return dict(commands=[dict(command="speckit.greenfield-foundation.project-ready", inputs=dict(common, operation="prepare"))], boundary="project-ready")
         try:
             self.require(data, "project-ready")

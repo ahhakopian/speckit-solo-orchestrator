@@ -310,6 +310,55 @@ class RoutingTests(Fixture):
             self.assertNotIn(forbidden, runtime)
 
 
+class ProjectReadyRoutingTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.foundation()
+        data = self.repo.load()
+        data["approvals"] = [a for a in data["approvals"] if a["boundary"] != "project-ready"]
+        self.repo.save(data)
+
+    def assert_operation(self, operation):
+        before = self.snapshot()
+        for _ in range(2):
+            route = solo.Repository(self.project).next()
+            self.assertEqual(route["boundary"], "project-ready")
+            self.assertEqual(self.commands(route), ["speckit.greenfield-foundation.project-ready"])
+            self.assertEqual(route["commands"][0]["inputs"]["operation"], operation)
+        self.assertEqual(before, self.snapshot())
+        self.assertFalse((self.project / ".specify/workflows/runs").exists())
+        self.assertEqual(set(self.repo.load()), self.repo.facts.ROOT_FIELDS)
+
+    def test_missing_constitution_prepares(self):
+        (self.project / ".specify/memory/constitution.md").unlink()
+        self.assert_operation("prepare")
+
+    def test_native_init_scaffold_prepares_without_state(self):
+        (self.project / ".specify/memory/constitution.md").unlink()
+        result = subprocess.run(
+            ["specify", "init", "--here", "--force", "--integration", "codex",
+             "--integration-options=--skills", "--ignore-agent-tools"],
+            cwd=self.project, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.project / ".specify/memory/constitution.md").read_bytes(),
+                         solo.native_constitution_scaffold())
+        self.assert_operation("prepare")
+
+    def test_authored_constitution_verifies_without_modification(self):
+        self.assert_operation("verify")
+
+    def test_partially_authored_scaffold_is_not_disposable(self):
+        scaffold = solo.native_constitution_scaffold().decode()
+        for content in (scaffold.replace("[PROJECT_NAME]", "Authored Project", 1),
+                        scaffold + "\n## Authored invariant\nPreserve this policy.\n"):
+            with self.subTest(content=content[:40]):
+                self.write(".specify/memory/constitution.md", content)
+                # Even an identical project override cannot redefine native identity.
+                self.write(".specify/templates/constitution-template.md", content)
+                self.assert_operation("verify")
+
+
 class InstallationTests(Fixture):
     def install(self):
         # Only disposable projects: native managers generate commands/skills, no agents run.

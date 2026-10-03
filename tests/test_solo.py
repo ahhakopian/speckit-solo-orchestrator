@@ -243,8 +243,9 @@ class RoutingTests(Fixture):
         with self.assertRaisesRegex(ValueError, "stale"):
             self.repo.readiness()
         self.repo.declare_prd("prd.md", human=True)
-        with self.assertRaisesRegex(ValueError, "Architecture authority escalation"):
-            self.repo.next()
+        route = self.repo.next()
+        self.assertEqual(self.commands(route), ["speckit.greenfield-foundation.architecture-reconcile"])
+        self.assertEqual(route["boundary"], "architecture")
         data = self.repo.load()
         data["product_gaps"] = [dict(gap_id="gap-a", question="Which approved behavior?", options=["A", "B"],
             recommended_option=1, rationale="Limited scope.", status="unresolved", discovered_on_revision=data["prd_revision"])]
@@ -317,6 +318,43 @@ class RoutingTests(Fixture):
         runtime = (ROOT / "extension/scripts/solo.py").read_text()
         for forbidden in ("WorkflowEngine", "RunState", "run_id", "current_stage", "sqlite", ".specify/workflows"):
             self.assertNotIn(forbidden, runtime)
+
+
+class ArchitectureReconciliationRoutingTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.foundation()
+        self.write("prd.md", "Explicitly approved changed product authority.\n")
+        self.repo.declare_prd("prd.md", human=True)
+
+    def test_fresh_cli_delegates_only_reconciliation_and_stops_at_architecture(self):
+        before = self.snapshot()
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "extension/scripts/solo.py"),
+                                 "--project", str(self.project), "next"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = {"commands": [{"command": "speckit.greenfield-foundation.architecture-reconcile",
+                                  "inputs": {"canonical_prd": "prd.md", "authorization": "native"}}],
+                    "boundary": "architecture"}
+        self.assertEqual(json.loads(result.stdout), expected)
+        # The owning command's proposal is response-only. No human decision or
+        # artifact write is inferred; a later fresh invocation still needs HITL.
+        self.assertEqual(solo.Repository(self.project).next(), expected)
+        self.assertEqual(before, self.snapshot())
+        command = (ROOT / "extension/commands/speckit.solo-orchestrator.route.md").read_text()
+        self.assertIn("When the response names a `boundary`, stop there", command)
+        self.assertIn("do not record its proposal as approval of the unchanged", command)
+
+    def test_missing_installed_reconciliation_contract_fails_closed(self):
+        path = self.project / ".specify/extensions/greenfield-foundation/commands/speckit.greenfield-foundation.architecture-reconcile.md"
+        path.unlink()  # An older installed foundation does not supply this command.
+        before = self.snapshot()
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "extension/scripts/solo.py"),
+                                 "--project", str(self.project), "next"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("BLOCKED:", result.stderr)
+        self.assertIn("architecture-reconcile.md", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(before, self.snapshot())
 
 
 class FeatureHitlRoutingTests(Fixture):

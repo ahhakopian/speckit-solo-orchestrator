@@ -332,7 +332,10 @@ class Repository:
             self.require(data, "architecture")
         except self.facts.FactError:
             if (self.project / "ROADMAP.md").exists():
-                raise ValueError("Architecture authority escalation: existing ROADMAP requires governed reconciliation")
+                command = "speckit.greenfield-foundation.architecture-reconcile"
+                self.facts.project_file(self.project,
+                    f".specify/extensions/greenfield-foundation/commands/{command}.md")
+                return dict(commands=[dict(command=command, inputs=common)], boundary="architecture")
             return dict(commands=[dict(command="speckit.greenfield-foundation.architecture", inputs=common)], boundary="architecture")
         if not (self.project / "ROADMAP.md").exists():
             return dict(commands=[dict(command="speckit.greenfield-foundation.roadmap", inputs=common)])

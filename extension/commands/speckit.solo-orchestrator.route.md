@@ -30,6 +30,11 @@ Human interaction and storage:
   --human`. Do not add another PRD approval gate or infer this declaration.
 - Architecture approval follows the installed foundation Architecture procedure.
   Present its material alternatives and current draft; stop for the human.
+  When the route returns `speckit.greenfield-foundation.architecture-reconcile`,
+  invoke that installed Solo Governance interface and stop at its Architecture
+  HITL with the proposal and affected ROADMAP entries. That entrypoint ends
+  before adoption; do not record its proposal as approval of the unchanged
+  baseline or invoke any subsequent command in this invocation.
 - Project Ready approval follows a fresh successful installed Project Ready
   verification. Record it only for `PROJECT READY`; invoke the installed
   lifecycle evaluator `initial --registry .specify/governance/hitl.json`, then

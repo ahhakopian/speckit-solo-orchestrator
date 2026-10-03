@@ -6,10 +6,9 @@ through native SpecKit generation; there is no hand-authored skill or agent
 runner. Stage behavior belongs to the installed SpecKit, Greenfield, Feature,
 MVP and existing UX/UI interfaces.
 
-Requires SpecKit 0.16.2, Greenfield foundation 0.1.0 and lifecycle 0.2.0 (source
-commit `49a469356c76a96df55b270ce771c9c27947f5f6`), Greenfield preset 0.4.1,
-Feature Governance Guard 1.0.1 and MVP Complexity Guard 1.1.0 with their existing
-governance presets. Native Core Feature context must identify exactly one
+Requires SpecKit 0.16.2, Solo Governance foundation 0.2.0 and lifecycle 0.2.0,
+Greenfield preset 0.4.1, Feature Governance Guard 1.0.1 and MVP Complexity Guard
+1.1.0 with their existing governance presets. Native Core Feature context must identify exactly one
 linked active Feature; ambiguous context blocks routing. For Feature work the
 existing Greenfield lifecycle configuration must explicitly use
 `completion_mode: human` and `approval_registry: .specify/governance/hitl.json`.
@@ -88,18 +87,21 @@ fingerprint. Guard and Preflight results remain transient and must PASS afresh
 before readiness; Analyze remains required before implementation.
 
 To update an existing governed project, release the Orchestrator Extension as
-`0.1.1` (recommended patch bump), then check out that release in the local
-Orchestrator clone. From the governed project's root run:
+`0.1.2`. From the governed project's root, update the Solo Governance Foundation
+and Orchestrator Extension together:
 
 ```bash
+specify extension add --dev ~/src/speckit-solo-governance/foundation --force
 specify extension add --dev ~/src/speckit-solo-orchestrator/extension --force
 ```
 
-The unchanged `0.1.0` prepend Preset and Governance prerequisites need no update.
-The native extension reinstall regenerates the Readiness command/skill and
-preserves `.specify/governance/hitl.json`. No registry schema or installed
-Governance API/version dependency changes. A legacy Readiness approval uses the
-old fingerprint and fails closed; after fresh Analyze, Guard and Preflight checks,
+Update the Solo Governance Foundation to 0.2.0 so its native Architecture
+reconciliation command is available; foundation 0.1.0 does not provide that
+interface and Solo fails closed when it is missing. The unchanged `0.1.0`
+prepend Preset and other Governance prerequisites need no update. The native
+extension reinstall regenerates the Readiness command/skill and preserves
+`.specify/governance/hitl.json`; its schema is unchanged. A legacy Readiness
+approval uses the old fingerprint and fails closed; after fresh Analyze, Guard and Preflight checks,
 obtain one explicit human Readiness approval and record it with:
 
 ```bash

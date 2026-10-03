@@ -46,7 +46,11 @@ Human interaction and storage:
   At the returned `spec` boundary, stop after Clarify and any applicable
   Checklist, and present the current Spec for explicit approval. Record only
   the human decision with `solo.py approve spec --human --verification PASS`.
-  This binds the current post-Clarify Spec, not completion of either review.
+  This binds the current post-Clarify Spec and the existing Project Ready
+  authorities: Canonical PRD, Architecture Baseline, ROADMAP scope, and
+  Constitution. Missing or stale Spec approval returns to this boundary before
+  any downstream stage, regardless of existing artifacts. Preserve downstream
+  artifacts, task state, implementation progress and evidence during reconciliation.
   Immediately before invoking any returned Plan command, run `solo.py next`
   again and confirm it still selects `speckit.plan` with no boundary. If
   Clarify, Checklist or any other action changed the Spec, the approval is

@@ -604,7 +604,9 @@ class SpecApprovalRoutingTests(Fixture):
             self.assertIn((self.project, "prd", "foundation", "specs/001-first/spec.md",
                            ["specs/001-first/spec.md"]), [c.args for c in fingerprint.call_args_list])
         self.assertEqual((approval["boundary"], approval["subject"], approval["inputs"]),
-                         ("spec", "RM-01", ["specs/001-first/spec.md"]))
+                         ("spec", "RM-01", [".specify/memory/constitution.md", "ROADMAP.md",
+                                               "architecture/baseline.md", "prd.md",
+                                               "specs/001-first/spec.md"]))
         route = solo.Repository(self.project).next()
         self.assertEqual(self.commands(route), ["speckit.clarify", "speckit.plan"])
         self.assertNotIn("boundary", route)
@@ -620,6 +622,75 @@ class SpecApprovalRoutingTests(Fixture):
         self.assert_spec_boundary()
         self.repo.approve("spec", human=True, verification="PASS")
         self.assertIn("speckit.plan", self.commands(solo.Repository(self.project).next()))
+
+    def test_existing_plan_with_stale_spec_returns_to_spec_without_writes(self):
+        self.repo.approve("spec", human=True, verification="PASS")
+        self.write("specs/001-first/plan.md", "COMPATIBLE\nExisting approved design.\n")
+        self.write("specs/001-first/spec.md", "ROADMAP entry: RM-01\nChanged local behavior.\n")
+        entry, spec = self.repo.feature()
+        with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
+            self.repo.require_spec_approval(self.repo.load(), entry, spec)
+        before = self.snapshot()
+        self.assert_spec_boundary()
+        self.assertEqual(before, self.snapshot())
+
+    def test_downstream_artifacts_and_approvals_cannot_bypass_spec_gate(self):
+        self.feature(tasks="- [x] T001 Implement approved contract\n- [ ] T002 Verify contract\n")
+        self.write("src/service.py", "Existing implementation progress.\n")
+        self.write("evidence/browser.txt", "Existing verification evidence.\n")
+        self.write("specs/001-first/ux-design.md", "Existing interaction design.\n")
+        self.write("specs/001-first/spec.md", "ROADMAP entry: RM-01\nChanged local behavior.\n")
+        # Even current downstream declarations cannot substitute for Spec approval.
+        for boundary in ("plan-ux", "tasks-guard", solo.READINESS):
+            self.repo.approve(boundary, human=True, verification="PASS")
+        entry, spec = self.repo.feature()
+        for boundary in ("plan-ux", "tasks-guard"):
+            self.repo.require_review_approval(self.repo.load(), boundary, entry, spec)
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                if missing:
+                    data = self.repo.load()
+                    data["approvals"] = [a for a in data["approvals"] if a["boundary"] != "spec"]
+                    self.repo.save(data)
+                before = self.snapshot()
+                self.assert_spec_boundary()
+                with self.assertRaisesRegex(ValueError, "Spec approval"):
+                    solo.Repository(self.project).readiness()
+                self.assertEqual(before, self.snapshot())
+
+    def test_current_spec_with_stale_plan_ux_still_routes_to_plan_ux(self):
+        self.feature()
+        self.write("specs/001-first/plan.md", "COMPATIBLE\nChanged plan design.\n")
+        entry, spec = self.repo.feature()
+        self.repo.require_spec_approval(self.repo.load(), entry, spec)
+        before = self.snapshot()
+        self.assertEqual(solo.Repository(self.project).next(),
+                         {"commands": [], "boundary": "plan-ux", "subject": "RM-01"})
+        self.assertEqual(before, self.snapshot())
+
+    def test_governing_authority_changes_require_spec_renewal_after_foundation_renewal(self):
+        self.repo.approve("spec", human=True, verification="PASS")
+        entry, spec = self.repo.feature()
+        original_data = self.repo.load()
+        for relative in ("prd.md", "architecture/baseline.md", "ROADMAP.md",
+                         ".specify/memory/constitution.md"):
+            with self.subTest(relative=relative):
+                original = (self.project / relative).read_text()
+                self.write(relative, original + "Changed governing scope.\n")
+                if relative == "prd.md":
+                    self.repo.declare_prd("prd.md", human=True)
+                if relative in {"prd.md", "architecture/baseline.md"}:
+                    self.repo.approve("architecture", human=True, verification="PASS")
+                self.repo.approve("project-ready", human=True, verification="PROJECT READY")
+                with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
+                    self.repo.require_spec_approval(self.repo.load(), entry, spec)
+                before = self.snapshot()
+                self.assert_spec_boundary()
+                self.assertEqual(before, self.snapshot())
+                self.repo.approve("spec", human=True, verification="PASS")
+                self.assertIn("speckit.plan", self.commands(self.repo.next()))
+                self.write(relative, original)
+                self.repo.save(original_data)
 
     def test_noop_clarify_and_fresh_routes_create_no_completion_state(self):
         for approved in (False, True):

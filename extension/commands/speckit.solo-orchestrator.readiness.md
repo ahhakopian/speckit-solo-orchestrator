@@ -11,7 +11,10 @@ missing, uncertain or blocking, stop without writing implementation code.
 
 Run `python3 scripts/solo.py readiness` from the project root. A successful
 result is `IMPLEMENTATION READINESS: PASS`. Any error blocks Core implementation.
-For missing, rejected or stale approval, present the current Feature's spec,
+This check requires current Spec approval before checking Readiness. For missing
+or stale Spec approval, derive the route again with `solo.py next` and follow its
+existing governed Spec boundary; preserve all downstream artifacts and progress.
+For missing, rejected or stale Readiness approval, present the current Feature's spec,
 plan, tasks and applicable UX authorities for explicit Implementation Readiness
 approval. Do not choose for the human. Stop at this boundary; the Solo caller
 records the decision using `solo.py approve implementation-readiness --human --verification PASS`

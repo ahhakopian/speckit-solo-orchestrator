@@ -151,10 +151,15 @@ class Repository:
         inputs.update(evidence)
         return sorted(inputs)
 
-    def spec_fingerprint(self, spec):
+    def spec_inputs(self, data, spec):
+        inputs = self.facts.required_inputs("project-ready", data["canonical_prd"])
+        inputs.add(spec)
+        return sorted(inputs)
+
+    def document_fingerprint(self, relative):
         # Reuse the shared single-document fingerprint mode; this does not grant
-        # PRD authority to the Spec. Current foundation authorization is separate.
-        return self.facts.fingerprint(self.project, "prd", "foundation", spec, [spec])
+        # PRD authority to the document. Foundation authorization is separate.
+        return self.facts.fingerprint(self.project, "prd", "foundation", relative, [relative])
 
     def require_spec_approval(self, data, entry, spec):
         self.require(data, "project-ready")
@@ -163,7 +168,9 @@ class Repository:
                 found[0]["decision"] != "approve" or found[0]["verification"] != "PASS"):
             raise self.facts.FactError("Current human Spec approval required")
         approval = found[0]
-        if approval["inputs"] != [spec] or approval["fingerprint"] != self.spec_fingerprint(spec):
+        inputs = self.spec_inputs(data, spec)
+        if (approval["inputs"] != inputs or
+                approval["fingerprint"] != self.review_fingerprint("spec", entry.id, inputs, spec)):
             raise self.facts.FactError("Stale Spec approval")
         return approval
 
@@ -190,7 +197,7 @@ class Repository:
     def review_fingerprint(self, boundary, subject, inputs, spec):
         # Aggregate the installed helper's document fingerprints in the existing
         # approval field; no review result or procedural progress is stored.
-        values = {p: self.spec_fingerprint(p) for p in inputs}
+        values = {p: self.document_fingerprint(p) for p in inputs}
         if boundary in {"tasks-guard", READINESS}:
             relative = (Path(spec).parent / "tasks.md").as_posix()
             content = self.facts.authority_bytes(relative, self.facts.project_file(self.project, relative)).decode()
@@ -236,6 +243,7 @@ class Repository:
         entry, spec = self.feature()
         if entry.fields["Status"] != "active":
             raise ValueError("Implementation Readiness requires the current active Feature")
+        self.require_spec_approval(data, entry, spec)
         found = [a for a in data["approvals"] if a["boundary"] == READINESS and a["subject"] == entry.id]
         if not found or not found[0]["human"] or found[0]["decision"] != "approve" or found[0]["verification"] != "PASS":
             raise ValueError("Current human Implementation Readiness approval required")
@@ -262,7 +270,7 @@ class Repository:
                 raise ValueError("Feature approval requires the current active Feature")
             subject = entry.id
             if boundary == "spec":
-                inputs = [spec]
+                inputs = self.spec_inputs(data, spec)
             elif boundary in {"plan-ux", "tasks-guard", READINESS}:
                 inputs = self.review_inputs(data, boundary, spec)
             else:
@@ -280,9 +288,7 @@ class Repository:
         if verification != expected:
             raise ValueError(f"Approval requires current {expected} verification")
         fingerprint_boundary = "human-acceptance" if boundary == "post-implementation" else boundary
-        if boundary == "spec":
-            fingerprint = self.spec_fingerprint(spec)
-        elif boundary in {"plan-ux", "tasks-guard", READINESS}:
+        if boundary in {"spec", "plan-ux", "tasks-guard", READINESS}:
             fingerprint = self.review_fingerprint(boundary, subject, inputs, spec)
         else:
             fingerprint = self.facts.fingerprint(self.project, fingerprint_boundary, subject,
@@ -369,11 +375,11 @@ class Repository:
         self.human_mode()
         entry, spec = self.feature()
         folder = (self.project / spec).parent
+        try:
+            self.require_spec_approval(data, entry, spec)
+        except self.facts.FactError:
+            return dict(commands=[dict(command="speckit.clarify")], boundary="spec", subject=entry.id)
         if not (folder / "plan.md").exists():
-            try:
-                self.require_spec_approval(data, entry, spec)
-            except self.facts.FactError:
-                return dict(commands=[dict(command="speckit.clarify")], boundary="spec", subject=entry.id)
             return dict(commands=[dict(command="speckit.clarify"), dict(command="speckit.plan")])
         try:
             self.require_review_approval(data, "plan-ux", entry, spec)

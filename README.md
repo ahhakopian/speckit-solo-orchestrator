@@ -50,10 +50,15 @@ explicit human declaration and current verification, supplied by the native
 command's human interaction. These facts are content-bound declarations, not
 cryptographic proof of the human or verification execution.
 
-Spec approval binds the current post-Clarify `spec.md` with the installed
-Greenfield helper's single-document (`prd`) fingerprint mode; this is content
-hashing, not PRD authorization. Current Project Ready authorization is checked
-separately. Missing or stale Spec approval stops at Spec HITL before Plan.
+Spec approval binds the current post-Clarify `spec.md` and the existing Project
+Ready authority set: Canonical PRD, Architecture Baseline, ROADMAP scope, and
+Constitution. It aggregates the installed Greenfield helper's document hashes,
+using its existing authority normalization. Current Project Ready authorization
+is checked separately; renewing it does not renew Spec approval. Missing or stale
+Spec approval stops at Spec HITL before any downstream routing, even when Plan,
+Tasks, implementation progress or evidence already exists. Standalone Readiness
+also requires current Spec approval. Existing artifacts and approvals are preserved;
+legacy Spec approvals require explicit human renewal against the complete input set.
 Clarify may rerun without a completion fact; the caller rechecks routing after
 it and before Plan so an edit invalidates the earlier Plan selection. Optional
 Checklist remains applicability-driven and adds no completion/skipped fact.
@@ -87,7 +92,7 @@ fingerprint. Guard and Preflight results remain transient and must PASS afresh
 before readiness; Analyze remains required before implementation.
 
 To update an existing governed project, release the Orchestrator Extension as
-`0.1.3`. From the governed project's root, update the Solo Governance Foundation
+`0.1.4`. From the governed project's root, update the Solo Governance Foundation
 and Orchestrator Extension together:
 
 ```bash

@@ -6,8 +6,8 @@ through native SpecKit generation; there is no hand-authored skill or agent
 runner. Stage behavior belongs to the installed SpecKit, Greenfield, Feature,
 MVP and existing UX/UI interfaces.
 
-Requires SpecKit 0.16.2, Solo Governance foundation 0.2.0 and lifecycle 0.2.0,
-Greenfield preset 0.4.1, Feature Governance Guard 1.0.1 and MVP Complexity Guard
+Requires SpecKit 0.16.2, Solo Governance foundation 0.2.0 and lifecycle 0.2.1,
+Greenfield preset 0.4.2, Feature Governance Guard 1.0.1 and MVP Complexity Guard
 1.1.0 with their existing governance presets. Native Core Feature context must identify exactly one
 linked active Feature; ambiguous context blocks routing. For Feature work the
 existing Greenfield lifecycle configuration must explicitly use
@@ -59,6 +59,12 @@ Spec approval stops at Spec HITL before any downstream routing, even when Plan,
 Tasks, implementation progress or evidence already exists. Standalone Readiness
 also requires current Spec approval. Existing artifacts and approvals are preserved;
 legacy Spec approvals require explicit human renewal against the complete input set.
+Stale Spec approval invokes installed Specify in the same active Feature
+directory before Clarify and Spec HITL. Stale Plan/UX invokes existing Plan
+reconciliation before its approval; stale Tasks / Guard invokes existing Tasks
+reconciliation and its mandatory Guard before approval. Missing approvals alone
+do not regenerate existing Plan or Tasks. Solo Governance owns in-place artifact
+reconciliation and task-progress preservation.
 Clarify may rerun without a completion fact; the caller rechecks routing after
 it and before Plan so an edit invalidates the earlier Plan selection. Optional
 Checklist remains applicability-driven and adds no completion/skipped fact.
@@ -75,6 +81,10 @@ Native Tasks runs its existing mandatory after-tasks Guard before the approval
 stop. A fresh invocation with no current Tasks / Guard approval repeats the
 installed Guard, retaining no verdict ledger. Post-Implementation similarly
 requires current native MVP Simplification before approval and Converge.
+Converge's `tasks_appended` outcome returns to governed task routing without
+completion verification or acceptance. For clean convergence, the installed
+hook retains fresh completion verification; current Human Acceptance allows
+the separately authorized Complete operation without another acceptance stop.
 
 All Greenfield validation and authority content hashing use installed
 `governance_facts.py`. Implementation Readiness aggregates its document hashes
@@ -92,18 +102,21 @@ fingerprint. Guard and Preflight results remain transient and must PASS afresh
 before readiness; Analyze remains required before implementation.
 
 To update an existing governed project, release the Orchestrator Extension as
-`0.1.4`. From the governed project's root, update the Solo Governance Foundation
-and Orchestrator Extension together:
+`0.1.5`. From the governed project's root, update the Solo Governance components
+from Bundle release `v0.8.1` before the Orchestrator Extension. Update the
+Governance preset to 0.4.2 using its release ZIP; then update the Extensions:
 
 ```bash
 specify extension add --dev ~/src/speckit-solo-governance/foundation --force
+specify extension add --dev ~/src/speckit-solo-governance/extension --force
 specify extension add --dev ~/src/speckit-solo-orchestrator/extension --force
 ```
 
 Update the Solo Governance Foundation to 0.2.0 so its native Architecture
 reconciliation command is available; foundation 0.1.0 does not provide that
-interface and Solo fails closed when it is missing. The unchanged `0.1.0`
-prepend Preset and other Governance prerequisites need no update. The native
+interface and Solo fails closed when it is missing. Lifecycle 0.2.1 and
+Governance preset 0.4.2 provide the reconciliation and completion fixes.
+The unchanged `0.1.0` prepend Preset and Feature/MVP prerequisites need no update. The native
 extension reinstall regenerates the Readiness command/skill and preserves
 `.specify/governance/hitl.json`; its schema is unchanged. A legacy Readiness
 approval uses the old fingerprint and fails closed; after fresh Analyze, Guard and Preflight checks,

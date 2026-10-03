@@ -377,21 +377,31 @@ class Repository:
         folder = (self.project / spec).parent
         try:
             self.require_spec_approval(data, entry, spec)
-        except self.facts.FactError:
-            return dict(commands=[dict(command="speckit.clarify")], boundary="spec", subject=entry.id)
+        except self.facts.FactError as exc:
+            commands = []
+            if str(exc) == "Stale Spec approval":
+                commands.append(dict(command="speckit.specify", inputs={
+                    "roadmap_entry": entry.id,
+                    "SPECIFY_FEATURE_DIRECTORY": Path(spec).parent.as_posix(),
+                }))
+            commands.append(dict(command="speckit.clarify"))
+            return dict(commands=commands, boundary="spec", subject=entry.id)
         if not (folder / "plan.md").exists():
             return dict(commands=[dict(command="speckit.clarify"), dict(command="speckit.plan")])
         try:
             self.require_review_approval(data, "plan-ux", entry, spec)
-        except self.facts.FactError:
-            return dict(commands=[], boundary="plan-ux", subject=entry.id)
+        except self.facts.FactError as exc:
+            commands = ([dict(command="speckit.plan")] if str(exc) == "Stale plan-ux approval" else [])
+            return dict(commands=commands, boundary="plan-ux", subject=entry.id)
         if not (folder / "tasks.md").exists():
             return dict(commands=[dict(command="speckit.tasks")], boundary="tasks-guard", subject=entry.id)
         try:
             self.require_review_approval(data, "tasks-guard", entry, spec)
-        except self.facts.FactError:
-            return dict(commands=[dict(command="speckit.feature-governance-guard.review")],
-                        boundary="tasks-guard", subject=entry.id)
+        except self.facts.FactError as exc:
+            # Native Tasks owns its mandatory after_tasks Guard; do not dispatch it twice.
+            command = ("speckit.tasks" if str(exc) == "Stale tasks-guard approval"
+                       else "speckit.feature-governance-guard.review")
+            return dict(commands=[dict(command=command)], boundary="tasks-guard", subject=entry.id)
         try:
             self.lifecycle.require_clean_tasks(self.project, spec)
         except self.lifecycle.LifecycleError as exc:

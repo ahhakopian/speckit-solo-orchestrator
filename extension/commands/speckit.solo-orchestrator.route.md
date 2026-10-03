@@ -15,6 +15,12 @@ authority escalation, uncertainty or any human question. Never synthesize
 stage success. Read the installed interfaces rather than recreating their
 instructions, stage behavior, guards, lifecycle decisions or UI/UX integration.
 
+After Converge returns `tasks_appended`, discard the remaining commands and
+pending acceptance/completion result of that response and derive `solo.py next`
+again. The existing completion hook leaves the Feature active on that outcome.
+Follow the returned governed Tasks/Guard/Readiness/Implement path; do not invoke
+completion verification or seek Human Acceptance from the interrupted route.
+
 When the response names a `boundary`, stop there after its current commands
 succeed and present the human decision; do not proceed beyond it. A `result`
 is reported only after its commands succeed, then ends this invocation.
@@ -51,22 +57,35 @@ Human interaction and storage:
   Constitution. Missing or stale Spec approval returns to this boundary before
   any downstream stage, regardless of existing artifacts. Preserve downstream
   artifacts, task state, implementation progress and evidence during reconciliation.
+  For stale approval, first invoke the returned installed Specify against the
+  explicit existing Feature directory and ROADMAP entry. Its Solo Governance
+  addendum owns the narrow same-active-entry reconciliation and preservation.
   Immediately before invoking any returned Plan command, run `solo.py next`
-  again and confirm it still selects `speckit.plan` with no boundary. If
+  again and confirm it still selects `speckit.plan`, either with no boundary
+  for initial planning or at `plan-ux` for stale Plan reconciliation. If
   Clarify, Checklist or any other action changed the Spec, the approval is
   stale: stop at Spec HITL instead of invoking Plan. Never rely on an earlier
   returned Plan command as authorization. Do not record Clarify completion,
   Checklist completion or a Checklist-skipped fact.
 - At `plan-ux`, present the current native Plan and its applicable UX authority
-  for approval after Plan succeeds. Existing Plan owns shaping, compatibility
+  for approval after any returned Plan reconciliation succeeds. Stale Plan/UX
+  approval invokes existing Plan first; missing approval alone does not
+  regenerate an existing Plan. Its Solo Governance addendum preserves downstream
+  artifacts and owns shaping, compatibility
   and all design decisions. Record the explicit decision with
   `solo.py approve plan-ux --human --verification PASS`. Do not invoke Tasks
   without a current approval. Immediately before a returned Tasks command,
   derive the route again and confirm Tasks is still selected; changed Plan/UX
   content requires renewed approval.
+  If planning changes the Spec, return to its governed reconciliation/approval
+  boundary before presenting Plan/UX approval; do not approve past stale Spec.
 - At `tasks-guard`, stop only after native Tasks and its mandatory `after_tasks`
   Feature Governance Guard succeed. For an existing tasks file, run the returned
-  installed Guard afresh; do not recover a saved verdict. Present the current
+  Tasks reconciliation when scope is stale; its mandatory `after_tasks` Guard
+  runs before the approval stop, so do not invoke that hook twice. Missing
+  approval alone returns the installed read-only Guard. The Tasks addendum
+  preserves applicable IDs, completed markers, implementation and evidence.
+  Do not recover a saved verdict. Present the current
   tasks and fresh `FEATURE_GOVERNANCE: PASS` response for approval, then record
   the explicit decision with `solo.py approve tasks-guard --human --verification PASS`.
   Immediately before a returned Analyze command, derive the route again and
@@ -88,10 +107,14 @@ Human interaction and storage:
   approval. Do not persist implementation or Simplification completion.
 - Human Acceptance follows clean native Converge and fresh installed Greenfield
   completion verification. Retain flags and required evidence only in the active
-  response. If Converge adds tasks, inspect state again and return to Analyze /
-  Implement; do not seek acceptance yet. Record approval with each required
+  response. If Converge adds tasks, inspect state again and return to governed
+  Tasks reconciliation / Guard / Readiness / Implement; do not seek acceptance
+  yet. Record approval with each required
   `--evidence` path, then invoke installed Greenfield Complete with
   `operation=complete`. It repeats verification and enforces acceptance itself.
+  On a fresh accepted route, Converge still runs and its hook verifies afresh.
+  Current acceptance returns without another acceptance stop, allowing the
+  explicit Complete command; missing/stale acceptance still stops completion.
   Stop at Feature DONE; never advance to another Feature or release implicitly.
 
 For these decisions use `solo.py approve <boundary> --human` (or `--reject`),

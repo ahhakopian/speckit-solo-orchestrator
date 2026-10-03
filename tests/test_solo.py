@@ -45,24 +45,24 @@ class Fixture(TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def foundation(self):
+    def foundation(self, feature_id="RM-01"):
         self.repo.declare_prd("prd.md", human=True)
         self.write("architecture/baseline.md", "Status: Draft\nRevision: 1\nApproved contract.\n")
         self.repo.approve("architecture", human=True, verification="PASS")
         self.write("architecture/baseline.md", "Status: Approved\nRevision: 1\nApproved contract.\n")
-        self.write("ROADMAP.md", "<!-- roadmap-entry: RM-01 -->\nStatus: planned\nStatus reason: pending approval\nDepends on: none\nFeature spec: none\nOutcome: First approved contract.\n")
+        self.write("ROADMAP.md", f"<!-- roadmap-entry: {feature_id} -->\nStatus: planned\nStatus reason: pending approval\nDepends on: none\nFeature spec: none\nOutcome: First approved contract.\n")
         self.write(".specify/memory/constitution.md", "# Constitution\nDurable invariant.\n")
         self.repo.approve("project-ready", human=True, verification="PROJECT READY")
 
-    def feature(self, tasks="- [ ] T001 Implement approved contract\n"):
-        self.foundation()
+    def feature(self, tasks="- [ ] T001 Implement approved contract\n", feature_id="RM-01"):
+        self.foundation(feature_id)
         lifecycle = self.repo.lifecycle
         args = lifecycle.parser().parse_args(["initial", "--registry", solo.REGISTRY])
         lifecycle.apply(self.project, args)
-        self.write("specs/001-first/spec.md", "ROADMAP entry: RM-01\nApproved local behavior.\n")
+        self.write("specs/001-first/spec.md", f"ROADMAP entry: {feature_id}\nApproved local behavior.\n")
         self.write("specs/001-first/checklists/requirements.md", "- [x] Quality\n")
         self.write(".specify/feature.json", json.dumps({"feature_directory": "specs/001-first"}))
-        args = lifecycle.parser().parse_args(["start", "RM-01", "specs/001-first/spec.md"])
+        args = lifecycle.parser().parse_args(["start", feature_id, "specs/001-first/spec.md"])
         lifecycle.apply(self.project, args)
         self.repo.approve("spec", human=True, verification="PASS")
         self.write("specs/001-first/plan.md", "COMPATIBLE\nApproved design.\n")
@@ -503,6 +503,101 @@ class FeatureHitlRoutingTests(Fixture):
                 self.repo.save(saved)
 
 
+class LifecycleRecoveryRoutingTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.feature(feature_id="RM-02", tasks=(
+            "- [x] T001 Implement approved contract\n- [ ] T002 Verify contract\n"))
+        self.write("src/service.py", "Existing RM-02 implementation.\n")
+        self.write("evidence/result.txt", "Existing RM-02 verification.\n")
+
+    def test_rm02_spec_plan_tasks_reconciliation_order_preserves_progress(self):
+        self.write("specs/001-first/spec.md", "ROADMAP entry: RM-02\nReconciled local behavior.\n")
+        before = self.snapshot()
+        route = self.repo.next()
+        self.assertEqual(route, {"commands": [
+            {"command": "speckit.specify", "inputs": {
+                "roadmap_entry": "RM-02", "SPECIFY_FEATURE_DIRECTORY": "specs/001-first"}},
+            {"command": "speckit.clarify"}], "boundary": "spec", "subject": "RM-02"})
+        self.assertEqual(before, self.snapshot())
+        # Simulate successful native reconciliation/review and explicit HITL only.
+        args = self.repo.lifecycle.parser().parse_args(["start", "RM-02", "specs/001-first/spec.md"])
+        self.assertFalse(self.repo.lifecycle.apply(self.project, args)["changed"])
+        self.repo.approve("spec", human=True, verification="PASS")
+        route = self.repo.next()
+        self.assertEqual((self.commands(route), route["boundary"]), (["speckit.plan"], "plan-ux"))
+        self.write("specs/001-first/plan.md", "COMPATIBLE\nReconciled approved design.\n")
+        self.repo.approve("plan-ux", human=True, verification="PASS")
+        route = self.repo.next()
+        self.assertEqual((self.commands(route), route["boundary"]), (["speckit.tasks"], "tasks-guard"))
+        self.assertEqual((self.project / "specs/001-first/tasks.md").read_bytes(),
+                         before["specs/001-first/tasks.md"])
+        self.write("specs/001-first/tasks.md", before["specs/001-first/tasks.md"].decode() +
+                   "- [ ] T003 Verify reconciled behavior\n")
+        self.repo.approve("tasks-guard", human=True, verification="PASS")
+        self.assertEqual(self.commands(self.repo.next()), ["speckit.analyze", "speckit.implement"])
+        self.assertTrue((self.project / "specs/001-first/tasks.md").read_bytes().startswith(
+            before["specs/001-first/tasks.md"]))
+        for relative in ("src/service.py", "evidence/result.txt", "ROADMAP.md", ".specify/feature.json"):
+            self.assertEqual((self.project / relative).read_bytes(), before[relative])
+        with self.assertRaisesRegex(ValueError, "Implementation Readiness approval required"):
+            self.repo.readiness()
+
+    def test_missing_plan_and_tasks_approvals_do_not_regenerate_existing_artifacts(self):
+        for boundary, commands in (("plan-ux", []),
+                                   ("tasks-guard", ["speckit.feature-governance-guard.review"])):
+            with self.subTest(boundary=boundary):
+                data = self.repo.load()
+                data["approvals"] = [a for a in data["approvals"] if a["boundary"] != boundary]
+                self.repo.save(data)
+                before = self.snapshot()
+                route = self.repo.next()
+                self.assertEqual((self.commands(route), route["boundary"]), (commands, boundary))
+                self.assertEqual(before, self.snapshot())
+                self.repo.approve(boundary, human=True, verification="PASS")
+
+    def test_converge_tasks_appended_returns_to_governed_tasks_routing(self):
+        path = self.project / "specs/001-first/tasks.md"
+        self.write("specs/001-first/tasks.md", path.read_text().replace("[ ]", "[x]"))
+        self.repo.approve("post-implementation", human=True, verification="PASS")
+        self.assertEqual(self.repo.next()["boundary"], "human-acceptance")
+        previous = path.read_text()
+        self.write("specs/001-first/tasks.md", previous + "- [ ] T003 Correct convergence finding\n")
+        before = self.snapshot()
+        args = self.repo.lifecycle.parser().parse_args(["hook", "RM-02", "--converge", "tasks_appended"])
+        with patch.object(self.repo.lifecycle, "verify_completion") as verify:
+            result = self.repo.lifecycle.apply(self.project, args)
+            verify.assert_not_called()
+        self.assertEqual((result["status"], result["changed"]), ("active", False))
+        self.assertEqual(self.commands(self.repo.next()), ["speckit.tasks"])
+        self.assertEqual(before, self.snapshot())
+        self.assertTrue(path.read_text().startswith(previous))
+        command = (ROOT / "extension/commands/speckit.solo-orchestrator.route.md").read_text()
+        self.assertIn("discard the remaining commands", command)
+
+    def test_current_acceptance_passes_hook_and_reaches_explicit_complete(self):
+        path = self.project / "specs/001-first/tasks.md"
+        self.write("specs/001-first/tasks.md", path.read_text().replace("[ ]", "[x]"))
+        self.repo.approve("post-implementation", human=True, verification="PASS")
+        self.repo.approve("human-acceptance", human=True, verification="PASS", evidence=["evidence/result.txt"])
+        route = solo.Repository(self.project).next()
+        self.assertEqual(self.commands(route), ["speckit.converge", "speckit.greenfield-roadmap-lifecycle.complete"])
+        flags = ["--converge", "clean", "--compatibility", "COMPATIBLE",
+                 "--feature-after-tasks", "PASS", "--feature-before-implement", "PASS",
+                 "--mvp-before-implement", "PASS", "--mvp-after-implement", "PASS",
+                 "--verification", "PASS", "--blockers", "none", "--evidence", "evidence/result.txt"]
+        # Current fresh verification flags stand in for installed agent reviews.
+        before = self.snapshot()
+        hook = self.repo.lifecycle.apply(self.project,
+            self.repo.lifecycle.parser().parse_args(["hook", "RM-02"] + flags))
+        self.assertFalse(hook["human_acceptance_required"])
+        self.assertEqual(before, self.snapshot())
+        complete = self.repo.lifecycle.apply(self.project,
+            self.repo.lifecycle.parser().parse_args(["complete", "RM-02"] + flags))
+        self.assertEqual(complete["status"], "done")
+        self.assertEqual(solo.Repository(self.project).next()["result"], "FEATURE DONE")
+
+
 class ReadinessFreshnessTests(Fixture):
     def setUp(self):
         super().setUp()
@@ -588,9 +683,13 @@ class SpecApprovalRoutingTests(Fixture):
         data["approvals"] = [a for a in data["approvals"] if a["boundary"] != "spec"]
         self.repo.save(data)
 
-    def assert_spec_boundary(self):
+    def assert_spec_boundary(self, reconcile=False):
         route = solo.Repository(self.project).next()
-        self.assertEqual(self.commands(route), ["speckit.clarify"])
+        expected = ["speckit.specify", "speckit.clarify"] if reconcile else ["speckit.clarify"]
+        self.assertEqual(self.commands(route), expected)
+        if reconcile:
+            self.assertEqual(route["commands"][0]["inputs"], {
+                "roadmap_entry": "RM-01", "SPECIFY_FEATURE_DIRECTORY": "specs/001-first"})
         self.assertEqual(route["boundary"], "spec")
         self.assertEqual(route["subject"], "RM-01")
         self.assertNotIn("speckit.plan", self.commands(route))
@@ -619,7 +718,7 @@ class SpecApprovalRoutingTests(Fixture):
         entry, spec = self.repo.feature()
         with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
             self.repo.require_spec_approval(self.repo.load(), entry, spec)
-        self.assert_spec_boundary()
+        self.assert_spec_boundary(reconcile=True)
         self.repo.approve("spec", human=True, verification="PASS")
         self.assertIn("speckit.plan", self.commands(solo.Repository(self.project).next()))
 
@@ -631,7 +730,7 @@ class SpecApprovalRoutingTests(Fixture):
         with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
             self.repo.require_spec_approval(self.repo.load(), entry, spec)
         before = self.snapshot()
-        self.assert_spec_boundary()
+        self.assert_spec_boundary(reconcile=True)
         self.assertEqual(before, self.snapshot())
 
     def test_downstream_artifacts_and_approvals_cannot_bypass_spec_gate(self):
@@ -653,7 +752,7 @@ class SpecApprovalRoutingTests(Fixture):
                     data["approvals"] = [a for a in data["approvals"] if a["boundary"] != "spec"]
                     self.repo.save(data)
                 before = self.snapshot()
-                self.assert_spec_boundary()
+                self.assert_spec_boundary(reconcile=not missing)
                 with self.assertRaisesRegex(ValueError, "Spec approval"):
                     solo.Repository(self.project).readiness()
                 self.assertEqual(before, self.snapshot())
@@ -665,7 +764,7 @@ class SpecApprovalRoutingTests(Fixture):
         self.repo.require_spec_approval(self.repo.load(), entry, spec)
         before = self.snapshot()
         self.assertEqual(solo.Repository(self.project).next(),
-                         {"commands": [], "boundary": "plan-ux", "subject": "RM-01"})
+                         {"commands": [{"command": "speckit.plan"}], "boundary": "plan-ux", "subject": "RM-01"})
         self.assertEqual(before, self.snapshot())
 
     def test_governing_authority_changes_require_spec_renewal_after_foundation_renewal(self):
@@ -685,7 +784,7 @@ class SpecApprovalRoutingTests(Fixture):
                 with self.assertRaisesRegex(ValueError, "Stale Spec approval"):
                     self.repo.require_spec_approval(self.repo.load(), entry, spec)
                 before = self.snapshot()
-                self.assert_spec_boundary()
+                self.assert_spec_boundary(reconcile=True)
                 self.assertEqual(before, self.snapshot())
                 self.repo.approve("spec", human=True, verification="PASS")
                 self.assertIn("speckit.plan", self.commands(self.repo.next()))
@@ -714,7 +813,7 @@ class SpecApprovalRoutingTests(Fixture):
         command = (ROOT / "extension/commands/speckit.solo-orchestrator.route.md").read_text()
         self.assertIn("explicitly call for it", command)
         self.assertIn("Immediately before invoking any returned Plan command", command)
-        self.assertIn("again and confirm it still selects `speckit.plan` with no boundary", command)
+        self.assertIn("again and confirm it still selects `speckit.plan`", command)
         self.assertNotIn("checklist-skipped", [a["boundary"] for a in self.repo.load()["approvals"]])
 
     def test_rejected_and_wrong_feature_approvals_never_select_plan(self):

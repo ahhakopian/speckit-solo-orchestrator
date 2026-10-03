@@ -2,7 +2,7 @@ schema_version: "1.0"
 extension:
   id: "solo-orchestrator"
   name: "Solo Orchestrator"
-  version: "0.1.4"
+  version: "0.1.5"
   description: "Route repository-native governed work to installed interfaces."
   author: "Local Governance"
   license: "MIT"

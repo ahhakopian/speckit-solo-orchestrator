@@ -73,13 +73,43 @@ installed Guard, retaining no verdict ledger. Post-Implementation similarly
 requires current native MVP Simplification before approval and Converge.
 
 All Greenfield validation and authority content hashing use installed
-`governance_facts.py`. Implementation Readiness and Post-Implementation reuse its conservative
-`human-acceptance` fingerprint, binding foundation and Feature authorities,
-applicable UX, and the project tree. Code, evidence and task changes invalidate
-readiness on a subsequent invocation, including partial implementation; it
-must be explicitly approved again before another Core implementation invocation.
-This conservative binding avoids a second fingerprint protocol. Guard and
-Preflight results remain transient and must PASS afresh before readiness.
+`governance_facts.py`. Implementation Readiness aggregates its document hashes
+using the same authority selection as Tasks / Guard: Canonical PRD, Architecture
+Baseline, ROADMAP scope, Constitution, Spec, Plan, Tasks, applicable `DESIGN.md`,
+Feature `ux-design.md`, `research.md`, `data-model.md`, `quickstart.md`,
+`backward-exception.md`, and files under Feature `contracts/` and `design/`.
+Additions, deletions and content changes to these authorities invalidate Readiness.
+Only native task completion marks are normalized; task scope remains bound.
+Implementation source, tests, build outputs and implementation/browser evidence
+do not participate in Readiness freshness. `--evidence` does not add Readiness
+inputs; it remains available for Post-Implementation and Human Acceptance.
+Post-Implementation and Human Acceptance retain the conservative project-tree
+fingerprint. Guard and Preflight results remain transient and must PASS afresh
+before readiness; Analyze remains required before implementation.
+
+To update an existing governed project, release the Orchestrator Extension as
+`0.1.1` (recommended patch bump), then check out that release in the local
+Orchestrator clone. From the governed project's root run:
+
+```bash
+specify extension add --dev ~/src/speckit-solo-orchestrator/extension --force
+```
+
+The unchanged `0.1.0` prepend Preset and Governance prerequisites need no update.
+The native extension reinstall regenerates the Readiness command/skill and
+preserves `.specify/governance/hitl.json`. No registry schema or installed
+Governance API/version dependency changes. A legacy Readiness approval uses the
+old fingerprint and fails closed; after fresh Analyze, Guard and Preflight checks,
+obtain one explicit human Readiness approval and record it with:
+
+```bash
+python3 .specify/extensions/solo-orchestrator/scripts/solo.py approve implementation-readiness --human --verification PASS
+```
+
+Record that command only after the actual human decision. Subsequent normal
+implementation increments retain Readiness freshness. Other HITL facts are
+preserved and retain their existing authority checks. No automatic migration or
+approval is performed.
 
 The prepend Preset fixes Core 0.16.2's inline hook enumeration by using the
 existing HookExecutor's priority order and agent invocation rendering. Native

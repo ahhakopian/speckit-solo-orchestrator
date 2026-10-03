@@ -16,7 +16,7 @@ from specify_cli.presets import PresetManager, PresetResolver
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT.parent
-GREENFIELD = TOOLS / "speckit-greenfield-governance"
+GREENFIELD = TOOLS / "speckit-solo-governance"
 spec = importlib.util.spec_from_file_location("solo", ROOT / "extension/scripts/solo.py")
 solo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(solo)
@@ -132,7 +132,7 @@ class RoutingTests(Fixture):
         self.assertEqual(set(data), self.repo.facts.ROOT_FIELDS)
         self.assertEqual(sum(a["boundary"] == solo.READINESS for a in data["approvals"]), 1)
         solo.Repository(self.project).readiness()
-        for name in ("specs/001-first/tasks.md", "specs/001-first/plan.md", "src/service.py", "DESIGN.md",
+        for name in ("specs/001-first/tasks.md", "specs/001-first/plan.md", "DESIGN.md",
                      "specs/001-first/design/ux.md"):
             with self.subTest(name=name):
                 self.repo.approve(solo.READINESS, human=True, verification="PASS")
@@ -140,19 +140,19 @@ class RoutingTests(Fixture):
                 with self.assertRaisesRegex(ValueError, "Stale|omits"):
                     solo.Repository(self.project).readiness()
 
-    def test_shared_fingerprint_binds_additions_and_deletions_without_enumeration(self):
+    def test_readiness_binds_optional_authority_additions_and_deletions(self):
         self.feature()
         self.write("specs/001-first/design/ux.md", "Current UX authority.\n")
         self.write("DESIGN.md", "Current design.\n")
         approval = self.repo.approve(solo.READINESS, human=True, verification="PASS")
-        self.assertEqual(set(approval["inputs"]), self.repo.facts.required_inputs(
-            "human-acceptance", "prd.md", "specs/001-first/spec.md"))
+        self.assertEqual(approval["inputs"], self.repo.review_inputs(
+            self.repo.load(), solo.READINESS, "specs/001-first/spec.md"))
         (self.project / "specs/001-first/design/ux.md").unlink()
-        with self.assertRaisesRegex(ValueError, "Stale"):
+        with self.assertRaisesRegex(ValueError, "Stale|omits"):
             self.repo.readiness()
         self.repo.approve(solo.READINESS, human=True, verification="PASS")
         (self.project / "DESIGN.md").unlink()
-        with self.assertRaisesRegex(ValueError, "Stale"):
+        with self.assertRaisesRegex(ValueError, "Stale|omits"):
             self.repo.readiness()
 
     def test_registry_accepts_only_approved_fact_boundaries_and_subject_categories(self):
@@ -220,7 +220,8 @@ class RoutingTests(Fixture):
         with patch.object(self.repo.facts, "fingerprint", wraps=self.repo.facts.fingerprint) as fingerprint:
             self.repo.approve(solo.READINESS, human=True, verification="PASS")
             self.repo.readiness()
-            self.assertEqual([c.args[1] for c in fingerprint.call_args_list].count("human-acceptance"), 2)
+            self.assertNotIn("human-acceptance", [c.args[1] for c in fingerprint.call_args_list])
+            self.assertIn("prd", [c.args[1] for c in fingerprint.call_args_list])
         with patch.object(self.repo.facts, "require_approval", wraps=self.repo.facts.require_approval) as require:
             with patch.object(self.repo.lifecycle, "require_clean_tasks", wraps=self.repo.lifecycle.require_clean_tasks) as tasks:
                 self.repo.next()
@@ -376,7 +377,7 @@ class FeatureHitlRoutingTests(Fixture):
             self.repo.readiness()
         self.repo.approve(solo.READINESS, human=True, verification="PASS")
         self.repo.readiness()
-        self.write("src/service.py", "Material implementation change.\n")
+        self.write("specs/001-first/tasks.md", "- [ ] T001 Changed governing scope\n")
         with self.assertRaisesRegex(ValueError, "Stale Implementation Readiness"):
             self.repo.readiness()
 
@@ -450,6 +451,81 @@ class FeatureHitlRoutingTests(Fixture):
                     self.repo.save(data)
                     self.assertEqual(self.repo.next()["boundary"], boundary)
                 self.repo.save(saved)
+
+
+class ReadinessFreshnessTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.feature(tasks="- [ ] T001 Implement approved contract\n- [ ] T002 Verify contract\n")
+
+    def test_implementation_outputs_do_not_invalidate_readiness(self):
+        for name in ("src/service.py", "tests/test_service.py", "evidence/browser.txt", "build/output.js"):
+            self.write(name, "Before implementation.\n")
+        approval = self.repo.approve(solo.READINESS, human=True, verification="PASS",
+                                     evidence=["evidence/browser.txt"])
+        self.assertNotIn("evidence/browser.txt", approval["inputs"])
+        for name in ("src/service.py", "tests/test_service.py", "evidence/browser.txt", "build/output.js"):
+            with self.subTest(name=name):
+                self.write(name, "Normal implementation increment.\n")
+                self.assertEqual(solo.Repository(self.project).readiness()["result"],
+                                 "IMPLEMENTATION READINESS: PASS")
+                (self.project / name).unlink()
+                solo.Repository(self.project).readiness()
+
+    def test_governing_authority_changes_invalidate_readiness(self):
+        for name in ("DESIGN.md", "specs/001-first/ux-design.md", "specs/001-first/research.md",
+                     "specs/001-first/data-model.md", "specs/001-first/quickstart.md",
+                     "specs/001-first/backward-exception.md", "specs/001-first/contracts/api.md",
+                     "specs/001-first/design/flow.md"):
+            self.write(name, "Approved authority.\n")
+        for name in ("specs/001-first/spec.md", "specs/001-first/plan.md", "specs/001-first/tasks.md",
+                     "DESIGN.md", "specs/001-first/ux-design.md", "specs/001-first/research.md",
+                     "specs/001-first/data-model.md", "specs/001-first/quickstart.md",
+                     "specs/001-first/backward-exception.md", "specs/001-first/contracts/api.md",
+                     "specs/001-first/design/flow.md", "prd.md", "architecture/baseline.md",
+                     "ROADMAP.md", ".specify/memory/constitution.md"):
+            with self.subTest(name=name):
+                original = (self.project / name).read_text()
+                self.repo.approve(solo.READINESS, human=True, verification="PASS")
+                self.write(name, original + "Changed governing scope.\n")
+                with self.assertRaisesRegex(ValueError, "[Ss]tale"):
+                    solo.Repository(self.project).readiness()
+                self.write(name, original)
+
+    def test_normal_increment_preserves_fresh_routing_and_mandatory_hook(self):
+        self.repo.approve(solo.READINESS, human=True, verification="PASS")
+        before = (self.project / solo.REGISTRY).read_bytes()
+        self.write("src/service.py", "Implemented first task.\n")
+        self.write("tests/test_service.py", "Regression coverage.\n")
+        self.write("evidence/browser.txt", "Browser verification.\n")
+        self.write("specs/001-first/tasks.md",
+                   "- [x] T001 Implement approved contract\n- [ ] T002 Verify contract\n")
+        fresh = solo.Repository(self.project)
+        route = fresh.next()
+        self.assertEqual(self.commands(route), ["speckit.analyze", "speckit.implement"])
+        self.assertNotEqual(route.get("boundary"), solo.READINESS)
+        # Routing delegates Readiness to before_implement; exercise that actual gate too.
+        self.assertEqual(fresh.readiness()["result"], "IMPLEMENTATION READINESS: PASS")
+        self.assertEqual(before, (self.project / solo.REGISTRY).read_bytes())
+        self.write("specs/001-first/tasks.md",
+                   "- [x] T001 Implement different scope\n- [ ] T002 Verify contract\n")
+        with self.assertRaisesRegex(ValueError, "Stale"):
+            fresh.readiness()
+        self.assertEqual(fresh.next()["boundary"], "tasks-guard")
+
+    def test_legacy_tree_fingerprint_requires_one_explicit_renewal(self):
+        entry, spec = self.repo.feature()
+        data = self.repo.load()
+        inputs = self.repo.feature_inputs(data, spec)
+        data["approvals"].append(dict(boundary=solo.READINESS, subject=entry.id,
+            decision="approve", human=True, verification="PASS", inputs=inputs,
+            fingerprint=self.repo.facts.fingerprint(self.project, "human-acceptance", entry.id,
+                                                   data["canonical_prd"], inputs, spec)))
+        self.repo.save(data)
+        with self.assertRaisesRegex(ValueError, "Stale|omits"):
+            self.repo.readiness()
+        self.repo.approve(solo.READINESS, human=True, verification="PASS")
+        self.repo.readiness()
 
 
 class SpecApprovalRoutingTests(Fixture):

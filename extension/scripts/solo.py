@@ -183,7 +183,7 @@ class Repository:
 
     def review_inputs(self, data, boundary, spec):
         inputs = self.plan_ux_inputs(data, spec)
-        if boundary == "tasks-guard":
+        if boundary in {"tasks-guard", READINESS}:
             inputs = sorted(inputs + [(Path(spec).parent / "tasks.md").as_posix()])
         return inputs
 
@@ -191,7 +191,7 @@ class Repository:
         # Aggregate the installed helper's document fingerprints in the existing
         # approval field; no review result or procedural progress is stored.
         values = {p: self.spec_fingerprint(p) for p in inputs}
-        if boundary == "tasks-guard":
+        if boundary in {"tasks-guard", READINESS}:
             relative = (Path(spec).parent / "tasks.md").as_posix()
             content = self.facts.authority_bytes(relative, self.facts.project_file(self.project, relative)).decode()
             # Native completion marks are progress, not changes to approved task scope.
@@ -240,11 +240,11 @@ class Repository:
         if not found or not found[0]["human"] or found[0]["decision"] != "approve" or found[0]["verification"] != "PASS":
             raise ValueError("Current human Implementation Readiness approval required")
         approval = found[0]
-        if not set(self.feature_inputs(data, spec)).issubset(approval["inputs"]):
-            raise ValueError("Implementation Readiness omits current Feature authorities")
-        # Reuse the installed conservative Feature fingerprint, including UX and code.
-        current = self.facts.fingerprint(self.project, "human-acceptance", entry.id,
-                                        data["canonical_prd"], approval["inputs"], spec)
+        inputs = self.review_inputs(data, READINESS, spec)
+        if approval["inputs"] != inputs:
+            raise ValueError("Stale Implementation Readiness approval: authority input set changed")
+        # Approval authorizes task scope; implementation outputs are not authorities.
+        current = self.review_fingerprint(READINESS, entry.id, inputs, spec)
         if current != approval["fingerprint"]:
             raise ValueError("Stale Implementation Readiness approval")
         return {"result": "IMPLEMENTATION READINESS: PASS"}
@@ -263,7 +263,7 @@ class Repository:
             subject = entry.id
             if boundary == "spec":
                 inputs = [spec]
-            elif boundary in {"plan-ux", "tasks-guard"}:
+            elif boundary in {"plan-ux", "tasks-guard", READINESS}:
                 inputs = self.review_inputs(data, boundary, spec)
             else:
                 if boundary == "post-implementation":
@@ -279,10 +279,10 @@ class Repository:
         expected = "PROJECT READY" if boundary == "project-ready" else "PASS"
         if verification != expected:
             raise ValueError(f"Approval requires current {expected} verification")
-        fingerprint_boundary = "human-acceptance" if boundary in {READINESS, "post-implementation"} else boundary
+        fingerprint_boundary = "human-acceptance" if boundary == "post-implementation" else boundary
         if boundary == "spec":
             fingerprint = self.spec_fingerprint(spec)
-        elif boundary in {"plan-ux", "tasks-guard"}:
+        elif boundary in {"plan-ux", "tasks-guard", READINESS}:
             fingerprint = self.review_fingerprint(boundary, subject, inputs, spec)
         else:
             fingerprint = self.facts.fingerprint(self.project, fingerprint_boundary, subject,

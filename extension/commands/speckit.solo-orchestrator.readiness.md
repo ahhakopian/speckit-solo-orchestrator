@@ -18,3 +18,10 @@ records the decision using `solo.py approve implementation-readiness --human --v
 only after the actual explicit human decision. A fresh invocation reruns the
 native guards and this check. Do not implement, persist guard results, or
 rerun/copy either guard from this hook.
+
+Readiness binds foundation authorities, Spec, Plan, Tasks scope and applicable
+UX/design authorities. Normal source, test, build or implementation/browser
+evidence changes do not require renewed Readiness approval. Native task
+completion marks do not change approved scope. Changed governing inputs still
+require renewed approval; an approval never substitutes for fresh Analyze,
+Feature Governance Guard or MVP Complexity Preflight requirements.

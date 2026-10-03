@@ -79,6 +79,18 @@ class Fixture(TestCase):
 
 
 class RoutingTests(Fixture):
+    def test_approved_draft_architecture_with_existing_roadmap_routes_to_roadmap(self):
+        self.repo.declare_prd("prd.md", human=True)
+        self.write("architecture/baseline.md", "Status: Draft\nRevision: 1\nApproved contract.\n")
+        self.repo.approve("architecture", human=True, verification="PASS")
+        self.write("ROADMAP.md", "<!-- roadmap-entry: RM-01 -->\nStatus: planned\nStatus reason: pending\nDepends on: none\nFeature spec: none\n")
+        before = self.snapshot()
+        route = solo.Repository(self.project).next()
+        self.assertEqual(self.commands(route), ["speckit.greenfield-foundation.roadmap"])
+        self.assertEqual(route["commands"][0]["inputs"], {"canonical_prd": "prd.md", "authorization": "native"})
+        self.assertNotIn("boundary", route)
+        self.assertEqual(before, self.snapshot())
+
     def test_foundation_actions_delegate_and_stop_at_existing_boundaries(self):
         self.assertEqual(self.repo.next()["result"], "APPROVED PRD INPUT REQUIRED")
         self.repo.declare_prd("prd.md", human=True)

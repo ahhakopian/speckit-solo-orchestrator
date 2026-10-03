@@ -87,7 +87,7 @@ fingerprint. Guard and Preflight results remain transient and must PASS afresh
 before readiness; Analyze remains required before implementation.
 
 To update an existing governed project, release the Orchestrator Extension as
-`0.1.2`. From the governed project's root, update the Solo Governance Foundation
+`0.1.3`. From the governed project's root, update the Solo Governance Foundation
 and Orchestrator Extension together:
 
 ```bash

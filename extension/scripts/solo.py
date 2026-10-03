@@ -337,7 +337,10 @@ class Repository:
                     f".specify/extensions/greenfield-foundation/commands/{command}.md")
                 return dict(commands=[dict(command=command, inputs=common)], boundary="architecture")
             return dict(commands=[dict(command="speckit.greenfield-foundation.architecture", inputs=common)], boundary="architecture")
-        if not (self.project / "ROADMAP.md").exists():
+        if not (self.project / "ROADMAP.md").exists() or any(
+            line.rstrip() == "Status: Draft"
+            for line in self.facts.project_file(self.project, "architecture/baseline.md").read_text(encoding="utf-8").splitlines()
+        ):
             return dict(commands=[dict(command="speckit.greenfield-foundation.roadmap", inputs=common)])
         constitution = self.project / ".specify/memory/constitution.md"
         if not constitution.exists() or constitution.read_bytes() == native_constitution_scaffold():

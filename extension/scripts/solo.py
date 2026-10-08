@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -149,6 +150,8 @@ class Repository:
     def feature_inputs(self, data, spec, evidence=()):
         inputs = self.facts.required_inputs("human-acceptance", data["canonical_prd"], spec)
         inputs.update(evidence)
+        if (self.project / Path(spec).parent / "browser-verification-plan.json").is_file() and (self.project / ".verification/platform.json").is_file():
+            inputs.add(".verification/platform.json")
         return sorted(inputs)
 
     def spec_inputs(self, data, spec):
@@ -186,13 +189,110 @@ class Repository:
             for path in (self.project / folder / name).rglob("*"):
                 if path.is_file():
                     inputs.add(path.relative_to(self.project).as_posix())
+        inputs.update(self.verification_inputs(spec))
         return sorted(inputs)
+
+    def verification_inputs(self, spec):
+        """Conditional adapter inputs; old unadopted features are not migrated."""
+        folder = Path(spec).parent
+        plan_path = self.project / folder / "plan.md"
+        text = plan_path.read_text(encoding="utf-8") if plan_path.is_file() else ""
+        binding_path = self.project / ".verification/platform.json"
+        sections = re.findall(r"(?ms)^## Verification Integration[^\S\n]*\n(.*?)(?=^## |\Z)", text)
+        if not sections:
+            if (self.project / folder / "browser-verification-plan.json").exists():
+                raise self.facts.FactError("Verification Plan reconciliation required: missing applicability")
+            return []  # A shared project binding does not adopt this feature.
+        if len(sections) != 1:
+            raise self.facts.FactError("Verification Plan reconciliation required: exactly one applicability section required")
+        dispositions = re.findall(r"(?mi)^Applicability:[ \t]*(.*?)[ \t]*$", sections[0])
+        if len(dispositions) != 1 or dispositions[0].lower() not in {"applicable", "not applicable"}:
+            raise self.facts.FactError("Verification Plan reconciliation required: exactly one valid applicability required")
+        if dispositions[0].lower() == "not applicable":
+            if not re.search(r"(?mi)^Reason:[ \t]*\S[^\n]*$", sections[0]):
+                raise self.facts.FactError("Verification Plan reconciliation required: missing non-applicability reason")
+            if (self.project / folder / "browser-verification-plan.json").exists():
+                raise self.facts.FactError("Verification Plan reconciliation required: contradictory proof artifact")
+            return []  # No platform dependency/input for justified non-applicability.
+        relative = (folder / "browser-verification-plan.json").as_posix()
+        for path in (relative, ".verification/platform.json"):
+            if not (self.project / path).is_file():
+                raise self.facts.FactError("Verification Plan reconciliation required: missing " + path)
+            self.facts.project_file(self.project, path)
+        try:
+            proof = json.loads((self.project / relative).read_text(encoding="utf-8"))
+            binding = json.loads(binding_path.read_text(encoding="utf-8"))
+            inputs = {relative, ".verification/platform.json"}
+            # Installed entry and resource paths are resolution configuration;
+            # their bytes are checked against the project-owned exact binding.
+            entry = os.environ.get("VERIFICATION_PLATFORM_VALIDATOR")
+            root = os.environ.get("VERIFICATION_PLATFORM_RESOURCES")
+            if not entry or not root:
+                raise ValueError("Explicit installed platform validator/resources required")
+            request = {"planBytes": (self.project / relative).read_text(encoding="utf-8"),
+                       "binding": binding, "resolution": {"root": root,
+                       "indexPath": binding["index"]["asset"], "mode": "planning"}}
+            result = subprocess.run(["node", entry], input=json.dumps(request),
+                                    capture_output=True, text=True, timeout=30)
+            report = json.loads(result.stdout)
+            if result.returncode or report.get("valid") is not True:
+                raise ValueError("Platform validation blocked: " + json.dumps(report.get("diagnostics", [])))
+            for declaration in proof.get("configurationReferences", []):
+                if declaration.get("purpose") == "provider-declaration":
+                    path = declaration["path"]
+                    self.facts.project_file(self.project, path)
+                    inputs.add(path)
+            return sorted(inputs)
+        except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.TimeoutExpired) as exc:
+            raise self.facts.FactError("Verification Plan reconciliation required: " + str(exc)) from exc
 
     def review_inputs(self, data, boundary, spec):
         inputs = self.plan_ux_inputs(data, spec)
         if boundary in {"tasks-guard", READINESS}:
             inputs = sorted(inputs + [(Path(spec).parent / "tasks.md").as_posix()])
         return inputs
+
+    def verification_handoff(self, assignment):
+        """Transient existing-task handoff; no stage, registry or host action."""
+        self.human_mode()
+        data = self.load()
+        self.require(data, "project-ready")
+        entry, spec = self.feature()
+        if entry.fields["Status"] != "active":
+            raise ValueError("Verification handoff requires the current active Feature")
+        self.require_spec_approval(data, entry, spec)
+        approvals = [self.require_review_approval(data, boundary, entry, spec)
+                     for boundary in ("plan-ux", "tasks-guard", READINESS)]
+        relative = (Path(spec).parent / "browser-verification-plan.json").as_posix()
+        plan_bytes = self.facts.project_file(self.project, relative).read_text(encoding="utf-8")
+        binding = json.loads(self.facts.project_file(self.project, ".verification/platform.json").read_text(encoding="utf-8"))
+        plan_digest = hashlib.sha256(plan_bytes.encode()).hexdigest()
+        binding_digest = hashlib.sha256(json.dumps(binding, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        try:
+            current = json.loads(json.dumps(assignment))
+            authorization = current["authorization"]
+            if (current["planDigest"] != plan_digest or authorization["planDigest"] != plan_digest or
+                    current["bindingDigest"] != binding_digest or authorization["bindingDigest"] != binding_digest):
+                raise ValueError("Caller authorization is not tied to current plan/binding")
+            if not authorization.get("reference"):
+                raise ValueError("Explicit caller authorization reference required")
+            authorization["reference"] += "; current native approvals: " + ", ".join(
+                approval["boundary"] + ":" + approval["fingerprint"] for approval in approvals)
+            validator = os.environ.get("VERIFICATION_PLATFORM_VALIDATOR")
+            root = os.environ.get("VERIFICATION_PLATFORM_RESOURCES")
+            if not validator or not root:
+                raise ValueError("Matching installed platform execution validator/resources required")
+            request = {"planBytes": plan_bytes, "binding": binding,
+                       "resolution": {"root": root, "indexPath": binding["index"]["asset"], "mode": "execution"},
+                       "assignment": current, "projectRoot": str(self.project)}
+            result = subprocess.run(["node", validator], input=json.dumps(request), capture_output=True, text=True, timeout=30)
+            report = json.loads(result.stdout)
+            if result.returncode or report.get("valid") is not True:
+                raise ValueError("Platform execution handoff blocked: " + json.dumps(report.get("diagnostics", [])))
+            return {"schemaVersion": 1, "planPath": relative, "planDigest": plan_digest,
+                    "binding": binding, "assignment": current}
+        except (ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired) as exc:
+            raise self.facts.FactError("Verification handoff blocked: " + str(exc)) from exc
 
     def review_fingerprint(self, boundary, subject, inputs, spec):
         # Aggregate the installed helper's document fingerprints in the existing
@@ -391,7 +491,7 @@ class Repository:
         try:
             self.require_review_approval(data, "plan-ux", entry, spec)
         except self.facts.FactError as exc:
-            commands = ([dict(command="speckit.plan")] if str(exc) == "Stale plan-ux approval" else [])
+            commands = ([dict(command="speckit.plan")] if str(exc) == "Stale plan-ux approval" or str(exc).startswith("Verification Plan reconciliation required:") else [])
             return dict(commands=commands, boundary="plan-ux", subject=entry.id)
         if not (folder / "tasks.md").exists():
             return dict(commands=[dict(command="speckit.tasks")], boundary="tasks-guard", subject=entry.id)

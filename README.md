@@ -6,8 +6,8 @@ through native SpecKit generation; there is no hand-authored skill or agent
 runner. Stage behavior belongs to the installed SpecKit, Greenfield, Feature,
 MVP and existing UX/UI interfaces.
 
-Requires SpecKit 0.16.2, Solo Governance foundation 0.2.0 and lifecycle 0.2.1,
-Greenfield preset 0.4.2, Feature Governance Guard 1.0.1 and MVP Complexity Guard
+Requires SpecKit 0.16.2, Solo Governance foundation 0.2.0 and lifecycle 0.3.0,
+Greenfield preset 0.4.2, Feature Governance Guard 1.1.0 and MVP Complexity Guard
 1.1.0 with their existing governance presets. Native Core Feature context must identify exactly one
 linked active Feature; ambiguous context blocks routing. For Feature work the
 existing Greenfield lifecycle configuration must explicitly use
@@ -102,8 +102,8 @@ fingerprint. Guard and Preflight results remain transient and must PASS afresh
 before readiness; Analyze remains required before implementation.
 
 To update an existing governed project, release the Orchestrator Extension as
-`0.1.5`. From the governed project's root, update the Solo Governance components
-from Bundle release `v0.8.1` before the Orchestrator Extension. Update the
+`0.2.0`. From the governed project's root, update the Solo Governance components
+from Bundle release `v0.9.0` before the Orchestrator Extension. Update the
 Governance preset to 0.4.2 using its release ZIP; then update the Extensions:
 
 ```bash
@@ -114,9 +114,13 @@ specify extension add --dev ~/src/speckit-solo-orchestrator/extension --force
 
 Update the Solo Governance Foundation to 0.2.0 so its native Architecture
 reconciliation command is available; foundation 0.1.0 does not provide that
-interface and Solo fails closed when it is missing. Lifecycle 0.2.1 and
+interface and Solo fails closed when it is missing. Lifecycle 0.3.0 and
 Governance preset 0.4.2 provide the reconciliation and completion fixes.
-The unchanged `0.1.0` prepend Preset and Feature/MVP prerequisites need no update. The native
+Feature Governance `v1.1.0` provides the current verification integration
+policy; Verification Platform `v0.1.0` supplies optional pinned verification
+resources. Neither platform installation nor a consumer binding is needed for
+non-applicable verification. The unchanged `0.1.0` prepend Preset and MVP
+prerequisites need no update. The native
 extension reinstall regenerates the Readiness command/skill and preserves
 `.specify/governance/hitl.json`; its schema is unchanged. A legacy Readiness
 approval uses the old fingerprint and fails closed; after fresh Analyze, Guard and Preflight checks,
@@ -145,6 +149,11 @@ Enforcement uses native generated agent instructions, as do the existing guards;
 the deterministic tests do not claim live-agent or OS-level execution isolation.
 
 Run focused deterministic tests with the Python exposing installed SpecKit:
+
+Installing or upgrading Solo requires no Verification Platform installation.
+Only a current feature's applicable approved verification obligations resolve
+platform resources. An unrelated project binding or justified non-applicability
+does not change the existing workflow or its approval inputs.
 
 ```bash
 /home/art/.local/share/uv/tools/specify-cli/bin/python -B -m unittest discover -s tests -v
